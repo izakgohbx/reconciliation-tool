@@ -130,10 +130,10 @@ function buildSinglePass(domain,matchKey,offRaw,sysRaw){
   const mismatchKeys=matchedKeys.filter(k=>!costColsAll.every(c=>cmp(k)[c].match));
 
   function calcAcc(){
-    if(!totalCols.length) return pct(fullMatchKeys.length,offKeys.length);
     let num=0,den=0;
-    for(const k of offKeys) den+=totalCols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
-    for(const k of matchedKeys){const comparison=cmp(k);for(const c of costColsAll){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
+    const cols=compCols.length?compCols:costColsAll;
+    for(const k of offKeys) den+=cols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
+    for(const k of matchedKeys){const comparison=cmp(k);for(const c of cols){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
     return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
   }
   function compStat(c){
@@ -169,10 +169,10 @@ function buildSinglePass(domain,matchKey,offRaw,sysRaw){
     r2("Full Match IDs",fullMatchKeys.length,P.lgreen,pct(fullMatchKeys.length,offKeys.length)+" of offline");
     r2("Overall Accuracy %",calcAcc(),P.lteal);r++;
     st("COST COMPONENTS BREAKDOWN",P.teal);
-    th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %","# Unique IDs w/ Mismatch"]);
+    th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %"]);
     for(const c of [...compCols,...totalCols]){const isTot=isTotalCol(c);const cs=compStat(c);const bad=cs.variance!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
-      ws[enc(r,0)]=cell(c,{sz:9,bg,bold:isTot});ws[enc(r,1)]=numCell(cs.offTotal,bg);ws[enc(r,2)]=numCell(cs.sysTotal,bg);ws[enc(r,3)]=numCell(cs.variance,bg,cs.variance<0?P.red:cs.variance>0?P.green:P.text);ws[enc(r,4)]=cell(cs.varPct,{sz:9,bg,fc,align:"center",bold:isTot});ws[enc(r,5)]=cell(cs.sysUniq,{sz:9,bg,fc:cs.sysUniq>0?P.red:P.green,align:"center",bold:isTot});r++;}
-    ws["!merges"]=mrgs;setRef(ws,r,W);ws["!cols"]=colW([34,16,16,16,12,22]);ws["!rows"]=Array(r+1).fill({hpt:18});return ws;
+      ws[enc(r,0)]=cell(c,{sz:9,bg,bold:isTot});ws[enc(r,1)]=numCell(cs.offTotal,bg);ws[enc(r,2)]=numCell(cs.sysTotal,bg);ws[enc(r,3)]=numCell(cs.variance,bg,cs.variance<0?P.red:cs.variance>0?P.green:P.text);ws[enc(r,4)]=cell(cs.varPct,{sz:9,bg,fc,align:"center",bold:isTot});r++;}
+    ws["!merges"]=mrgs;setRef(ws,r,W);ws["!cols"]=colW([34,16,16,16,12]);ws["!rows"]=Array(r+1).fill({hpt:18});return ws;
   }
 
   function buildDetail(keys,titleText,titleBg,diffAlwaysZero=false){
@@ -235,10 +235,10 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw){
     const fullMatchKeys=matchedKeys.filter(k=>costColsAll.every(c=>cmp(k)[c].match));
     const mismatchKeys=matchedKeys.filter(k=>!costColsAll.every(c=>cmp(k)[c].match));
     function calcAcc(){
-      if(!totalCols.length) return pct(fullMatchKeys.length,offKeys.length);
       let num=0,den=0;
-      for(const k of offKeys) den+=totalCols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
-      for(const k of matchedKeys){const comparison=cmp(k);for(const c of costColsAll){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
+      const cols=compCols.length?compCols:costColsAll;
+      for(const k of offKeys) den+=cols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
+      for(const k of matchedKeys){const comparison=cmp(k);for(const c of cols){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
       return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
     }
     function compStat(c){const offTotal=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);const sysTotal=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);const variance=f2(sysTotal-offTotal);const varPct=offTotal!==0?`${((variance/Math.abs(offTotal))*100).toFixed(1)}%`:"N/A";const misCnt=matchedKeys.filter(k=>!cmp(k)[c].match).length;const sysUniq=new Set(matchedKeys.filter(k=>!cmp(k)[c].match)).size;return{offTotal:f2(offTotal),sysTotal:f2(sysTotal),variance,varPct,misCnt,sysUniq};}
@@ -253,8 +253,9 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw){
   function calcOverallAcc(){
     let num=0,den=0;
     for(const p of passes){
-      if(p.totalCols.length) for(const k of p.offKeys) den+=p.totalCols.reduce((s,c)=>s+orZero(p.offIdx[k]?.[c]),0);
-      for(const k of p.matchedKeys){const comparison=p.cmp(k);for(const c of p.costColsAll){if(comparison[c].match)num+=orZero(p.offIdx[k]?.[c]);}}
+      const cols=p.compCols.length?p.compCols:p.costColsAll;
+      for(const k of p.offKeys) den+=cols.reduce((s,c)=>s+orZero(p.offIdx[k]?.[c]),0);
+      for(const k of p.matchedKeys){const comparison=p.cmp(k);for(const c of cols){if(comparison[c].match)num+=orZero(p.offIdx[k]?.[c]);}}
     }
     return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
   }
@@ -278,12 +279,12 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw){
       if(!p.offRows.length&&!p.sysRows.length) continue;
       const lpBg=p.bg===P.teal?P.lblue:p.bg===P.purple?P.lpurple:"FEF3C7";
       st(`${p.label.toUpperCase()} COMPONENTS BREAKDOWN`,p.bg);
-      th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %","# Unique Sys IDs w/ Mismatch"],lpBg);
+      th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %"],lpBg);
       for(const c of [...p.compCols,...p.totalCols]){const isTot=isTotalCol(c);const cs=p.compStat(c);const bad=cs.variance!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
-        ws[enc(r,0)]=cell(c,{sz:9,bg,bold:isTot});ws[enc(r,1)]=numCell(cs.offTotal,bg);ws[enc(r,2)]=numCell(cs.sysTotal,bg);ws[enc(r,3)]=numCell(cs.variance,bg,cs.variance<0?P.red:cs.variance>0?P.green:P.text);ws[enc(r,4)]=cell(cs.varPct,{sz:9,bg,fc,align:"center",bold:isTot});ws[enc(r,5)]=cell(cs.sysUniq,{sz:9,bg,fc:cs.sysUniq>0?P.red:P.green,align:"center",bold:isTot});r++;}
+        ws[enc(r,0)]=cell(c,{sz:9,bg,bold:isTot});ws[enc(r,1)]=numCell(cs.offTotal,bg);ws[enc(r,2)]=numCell(cs.sysTotal,bg);ws[enc(r,3)]=numCell(cs.variance,bg,cs.variance<0?P.red:cs.variance>0?P.green:P.text);ws[enc(r,4)]=cell(cs.varPct,{sz:9,bg,fc,align:"center",bold:isTot});r++;}
       r++;
     }
-    ws["!merges"]=mrgs;setRef(ws,r,W);ws["!cols"]=colW([34,16,16,16,12,22]);ws["!rows"]=Array(r+1).fill({hpt:18});return ws;
+    ws["!merges"]=mrgs;setRef(ws,r,W);ws["!cols"]=colW([34,16,16,16,12]);ws["!rows"]=Array(r+1).fill({hpt:18});return ws;
   }
 
   function buildDetailSheet(getKeys,titleText,titleBg,diffAlwaysZero=false){
