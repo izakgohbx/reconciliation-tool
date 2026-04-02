@@ -168,33 +168,53 @@ function buildSinglePass(domain,matchKey,offRaw,sysRaw,post){
   }
 
   function buildDetail(keys,titleText,titleBg,diffAlwaysZero=false){
-    const ws={},mrgs=[];let r=0;const fixedH=[matchKey,...infoCols];const totalC=fixedH.length+costColsAll.length*3-1;
+    const ws={},mrgs=[];let r=0;
+    const fixedH=[matchKey,...infoCols];
+    const totalC=fixedH.length+costColsAll.length*3-1;
+    // Title
     ws[enc(r,0)]=cell(`${titleText} — ${keys.length} records`,{bold:true,sz:10,fc:P.white,bg:titleBg,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    fixedH.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});let c=fixedH.length;
+    // Group headers
+    fixedH.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});
+    let c=fixedH.length;
     for(const comp of costColsAll){ws[enc(r,c)]=hdr(comp,P.blue);mrgs.push(mrg({r,c},{r,c:c+2}));c+=3;}r++;
+    // Sub-headers
     fixedH.forEach((_,i)=>{ws[enc(r,i)]=hdr("",P.navy);});c=fixedH.length;
     for(const _ of costColsAll){["Offline","System","Diff"].forEach((s,i)=>{ws[enc(r,c+i)]=hdr(s,P.blue);});c+=3;}r++;
+    // Data rows — plain values only (no per-cell styling) for performance
     for(const k of keys){
-      const rawRow=offRawMap[k]||sysRawMap[k]||{};const comparison=(offIdx[k]&&sysIdx[k])?cmp(k):null;let col=0;
+      const rawRow=offRawMap[k]||sysRawMap[k]||{};
+      const comparison=(offIdx[k]&&sysIdx[k])?cmp(k):null;
+      let col=0;
       ws[enc(r,col++)]=cell(k,{sz:9});
-      for(const inf of infoCols)ws[enc(r,col++)]=cell(String(rawRow[inf]??""),{sz:9});
+      for(const inf of infoCols) ws[enc(r,col++)]=cell(String(rawRow[inf]??""),{sz:9});
       for(const comp of costColsAll){
         const ov=comparison?comparison[comp].ov:(offIdx[k]?.[comp]??null);
         const sv=comparison?comparison[comp].sv:null;
         const diff=comparison?comparison[comp].diff:null;
         const match=comparison?comparison[comp].match:true;
-        ws[enc(r,col++)]=numCell(ov);ws[enc(r,col++)]=numCell(sv);
-        ws[enc(r,col++)]=cell(diffAlwaysZero?0:(diff??0),{bg:match?P.lgreen:P.lred,fc:match?P.green:P.red,bold:!match,align:"right",fmt:"#,##0.00"});
+        // Plain numeric cells for data rows
+        ws[enc(r,col++)]={v:ov===null?"":ov, t:ov===null?"s":"n", z:"#,##0.00"};
+        ws[enc(r,col++)]={v:sv===null?"":sv, t:sv===null?"s":"n", z:"#,##0.00"};
+        const dv=diffAlwaysZero?0:(diff??0);
+        ws[enc(r,col++)]={v:dv, t:"n", z:"#,##0.00"};
       }r++;
     }
-    ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=colW([16,...infoCols.map(()=>14),...costColsAll.flatMap(()=>[13,13,11])]);return ws;
+    ws["!merges"]=mrgs;setRef(ws,r,totalC);
+    ws["!cols"]=colW([16,...infoCols.map(()=>14),...costColsAll.flatMap(()=>[13,13,11])]);
+    return ws;
   }
 
   function buildOfflineOnly(){
     const ws={},mrgs=[];let r=0;const hdrs=[matchKey,...infoCols,...costColsAll];const totalC=hdrs.length-1;
     ws[enc(r,0)]=cell(`Offline Only — ${offOnlyKeys.length} records`,{bold:true,sz:10,fc:P.white,bg:P.red,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
     hdrs.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});r++;
-    for(const k of offOnlyKeys){const row=offRawMap[k]||{};let col=0;ws[enc(r,col++)]=cell(k,{sz:9});for(const inf of infoCols)ws[enc(r,col++)]=cell(String(row[inf]??""),{sz:9});for(const comp of costColsAll)ws[enc(r,col++)]=numCell(offIdx[k]?.[comp]??null);r++;}
+    for(const k of offOnlyKeys){
+      const row=offRawMap[k]||{};let col=0;
+      ws[enc(r,col++)]={v:k,t:"s"};
+      for(const inf of infoCols) ws[enc(r,col++)]={v:String(row[inf]??""),t:"s"};
+      for(const comp of costColsAll){const v=offIdx[k]?.[comp]??null;ws[enc(r,col++)]={v:v===null?"":v,t:v===null?"s":"n",z:"#,##0.00"};}
+      r++;
+    }
     ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=colW([16,...infoCols.map(()=>14),...costColsAll.map(()=>14)]);return ws;
   }
 
@@ -316,17 +336,21 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw,post){
       for(const comp of p.costColsAll){ws[enc(r,c)]=hdr(comp,P.blue);mrgs.push(mrg({r,c},{r,c:c+2}));c+=3;}r++;
       fixedH.forEach((_,i)=>{ws[enc(r,i)]=hdr("",P.navy);});c=fixedH.length;
       for(const _ of p.costColsAll){["Offline","System","Diff"].forEach((s,i)=>{ws[enc(r,c+i)]=hdr(s,P.blue);});c+=3;}r++;
+      // Plain data rows for performance
       for(const k of keys){
-        const rawRow=p.offRawMap[k]||p.sysRawMap[k]||{};const comparison=(p.offIdx[k]&&p.sysIdx[k])?p.cmp(k):null;let col=0;
-        ws[enc(r,col++)]=cell(k,{sz:9});
-        for(const inf of p.infoCols)ws[enc(r,col++)]=cell(String(rawRow[inf]??""),{sz:9});
+        const rawRow=p.offRawMap[k]||p.sysRawMap[k]||{};
+        const comparison=(p.offIdx[k]&&p.sysIdx[k])?p.cmp(k):null;
+        let col=0;
+        ws[enc(r,col++)]={v:k,t:"s"};
+        for(const inf of p.infoCols) ws[enc(r,col++)]={v:String(rawRow[inf]??""),t:"s"};
         for(const comp of p.costColsAll){
           const ov=comparison?comparison[comp].ov:(p.offIdx[k]?.[comp]??null);
           const sv=comparison?comparison[comp].sv:null;
           const diff=comparison?comparison[comp].diff:null;
-          const match=comparison?comparison[comp].match:true;
-          ws[enc(r,col++)]=numCell(ov);ws[enc(r,col++)]=numCell(sv);
-          ws[enc(r,col++)]=cell(diffAlwaysZero?0:(diff??0),{bg:match?P.lgreen:P.lred,fc:match?P.green:P.red,bold:!match,align:"right",fmt:"#,##0.00"});
+          ws[enc(r,col++)]={v:ov===null?"":ov,t:ov===null?"s":"n",z:"#,##0.00"};
+          ws[enc(r,col++)]={v:sv===null?"":sv,t:sv===null?"s":"n",z:"#,##0.00"};
+          const dv=diffAlwaysZero?0:(diff??0);
+          ws[enc(r,col++)]={v:dv,t:"n",z:"#,##0.00"};
         }r++;
       }
       r++;
@@ -339,11 +363,20 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw,post){
     const maxCols=Math.max(...passes.map(p=>p.costColsAll.length),1);
     const totalC=1+(passes[0]?.infoCols?.length||0)+maxCols;
     ws[enc(r,0)]=cell("OFFLINE ONLY RECORDS",{bold:true,sz:10,fc:P.white,bg:P.red,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    for(const p of passes){if(!p.offOnlyKeys.length)continue;const hdrs=[matchKey,...p.infoCols,...p.costColsAll];const tC=hdrs.length-1;
+    for(const p of passes){
+      if(!p.offOnlyKeys.length)continue;
+      const hdrs=[matchKey,...p.infoCols,...p.costColsAll];const tC=hdrs.length-1;
       ws[enc(r,0)]=cell(`${p.label} — ${p.offOnlyKeys.length} records not found in System File`,{bold:true,sz:9,fc:P.white,bg:p.bg});mrgs.push(mrg({r,c:0},{r,c:tC}));r++;
       hdrs.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});r++;
-      for(const k of p.offOnlyKeys){const row=p.offRawMap[k]||{};let col=0;ws[enc(r,col++)]=cell(k,{sz:9});for(const inf of p.infoCols)ws[enc(r,col++)]=cell(String(row[inf]??""),{sz:9});for(const comp of p.costColsAll)ws[enc(r,col++)]=numCell(p.offIdx[k]?.[comp]??null);r++;}
-      r++;}
+      for(const k of p.offOnlyKeys){
+        const row=p.offRawMap[k]||{};let col=0;
+        ws[enc(r,col++)]={v:k,t:"s"};
+        for(const inf of p.infoCols) ws[enc(r,col++)]={v:String(row[inf]??""),t:"s"};
+        for(const comp of p.costColsAll){const v=p.offIdx[k]?.[comp]??null;ws[enc(r,col++)]={v:v===null?"":v,t:v===null?"s":"n",z:"#,##0.00"};}
+        r++;
+      }
+      r++;
+    }
     ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=colW([16,...(passes[0]?.infoCols||[]).map(()=>14),...Array(maxCols).fill(14)]);return ws;
   }
 
