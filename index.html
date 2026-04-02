@@ -8,440 +8,311 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Inter', system-ui, sans-serif; background: #f9fafb; }</style>
+  <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Inter',system-ui,sans-serif;background:#f9fafb;}</style>
 </head>
 <body>
 <div id="root"></div>
+<script type="text/babel">
+const{useState,useCallback}=React;
 
-<!-- Worker script inlined as a blob -->
-<script id="worker-src" type="text/plain">
-importScripts('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
-
-const EXCLUDE_KEYWORDS = ["id","type","date","time","group","rate","rule","vehicle","agency","days","name","status","period","start","end","update","driver","ops","billing","rest day","data source","restday","datasource","payment"];
-function isCostCol(col){ const l=col.toLowerCase().trim(); return !EXCLUDE_KEYWORDS.some(kw=>l.includes(kw)); }
-function isTotalCol(col){ return col.toLowerCase().includes("total"); }
-function parseVal(v){
-  if(v===""||v===null||v===undefined) return null;
-  const cleaned=String(v).replace(/[^0-9.\-]/g,"");
-  if(cleaned===""||cleaned==="-") return null;
-  const x=parseFloat(cleaned); return isNaN(x)?null:x;
-}
-function orZero(v){return v===null?0:v;}
-function f2(v){return Math.round(v*100)/100;}
-function pct(a,b){return b!==0?`${((a/b)*100).toFixed(1)}%`:"N/A";}
-function countDuplicates(rows,matchKey){
-  const counts={};
-  for(const r of rows){const k=String(r[matchKey]??"").trim();if(k)counts[k]=(counts[k]||0)+1;}
-  let unique=0,duped=0;
-  for(const cnt of Object.values(counts)){if(cnt===1)unique+=1;else duped+=cnt;}
-  return{unique,duped,total:rows.length};
-}
-function getPaymentType(row){
-  const pt=String(row["Payment Type"]??"").trim().toLowerCase();
-  if(pt==="salary") return "Salary";
-  if(pt==="incentive") return "Incentive";
-  if(pt==="salary and incentive"||pt==="salary & incentive") return "SalaryAndIncentive";
-  return "Salary";
-}
-
-function readArrayBuffer(ab){
-  const wb=XLSX.read(ab,{type:"array"});
-  const all=[];
-  for(const sn of wb.SheetNames){
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:""});
-    all.push(...rows);
-  }
-  return all;
-}
-
-// ── Palette ──────────────────────────────────────────────────────────────────
-const P={
-  navy:"1E3A5F",blue:"2563EB",teal:"0D9488",green:"16A34A",red:"DC2626",amber:"D97706",purple:"7C3AED",
-  lgrey:"F3F4F6",lred:"FEE2E2",lgreen:"DCFCE7",lyellow:"FEF9C3",lblue:"DBEAFE",lteal:"CCFBF1",lpurple:"EDE9FE",
-  white:"FFFFFF",text:"111827",muted:"6B7280",
+const DOMAINS={
+  "Driver Cost":      {matchKey:"Driver ID",portalPath:"First Mile & Last Mile Cost / Line Haul Cost → Driver Cost",splitPaymentType:true},
+  "Truck Rental Cost":{matchKey:"Agency ID",portalPath:"Line Haul Cost → Truck Rental Cost",splitPaymentType:false,
+    billingTypes:["Trip Billing","TO Billing","MAWB Billing","Period Billing","Contract Task Billing","Master Task Billing","No Show Billing"]},
+  "Labor Payroll":    {matchKey:"Ops ID",portalPath:"Labour Payroll",splitPaymentType:true},
 };
-const fillS=hex=>({patternType:"solid",fgColor:{rgb:hex}});
-const noFill=()=>({patternType:"none"});
-function cell(v,opts={}){
-  const{bold=false,italic=false,sz=9,fc=P.text,bg=null,align="left",fmt=null,border=true}=opts;
-  const brd=border?{top:{style:"thin",color:{rgb:"E5E7EB"}},bottom:{style:"thin",color:{rgb:"E5E7EB"}},left:{style:"thin",color:{rgb:"E5E7EB"}},right:{style:"thin",color:{rgb:"E5E7EB"}}}:{};
-  return{v,t:typeof v==="number"?"n":"s",s:{font:{bold,italic,sz,color:{rgb:fc}},alignment:{horizontal:align,vertical:"center"},fill:bg?fillS(bg):noFill(),border:brd},...(fmt?{z:fmt}:{})};
-}
-function hdr(v,bg=P.navy,align="center",sz=9){return cell(v,{bold:true,fc:P.white,bg,align,sz});}
-function numCell(v,bg=null,fc=P.text){
-  if(v===null)return cell("",{bg,fc,align:"right"});
-  return cell(v,{bg,fc,align:"right",fmt:"#,##0.00"});
-}
-function enc(r,c){return XLSX.utils.encode_cell({r,c});}
-function setRef(ws,maxR,maxC){ws["!ref"]=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:maxR,c:maxC}});}
-function colW(arr){return arr.map(w=>({wch:w}));}
-function mrg(s,e){return{s,e};}
+const MARKETS=["BR","ID","MY","PH","SG","TH","TW","VN"];
+const EXCL=["id","type","date","time","group","rate","rule","vehicle","agency","days","name","status","period","start","end","update","driver","ops","billing","rest day","data source","restday","datasource","payment"];
 
-function buildWorkbook(domain,matchKey,splitPaymentType,offRaw,sysRaw,post){
-  if(!splitPaymentType) return buildSinglePass(domain,matchKey,offRaw,sysRaw,post);
-  return buildSplitPass(domain,matchKey,offRaw,sysRaw,post);
+const isCostCol=c=>!EXCL.some(k=>c.toLowerCase().trim().includes(k));
+const isTotalCol=c=>c.toLowerCase().includes("total");
+
+function readFile(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:"array"});
+        const all=[];
+        for(const sn of wb.SheetNames){all.push(...XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:""}));}
+        res(all);
+      }catch(err){rej(err);}
+    };
+    r.onerror=rej;
+    r.readAsArrayBuffer(file);
+  });
 }
 
+function parseVal(v){
+  if(v===""||v===null||v===undefined)return null;
+  const x=parseFloat(String(v).replace(/[^0-9.\-]/g,""));
+  return isNaN(x)?null:x;
+}
+const orZero=v=>v===null?0:v;
+const f2=v=>Math.round(v*100)/100;
+const pct=(a,b)=>b!==0?`${((a/b)*100).toFixed(1)}%`:"N/A";
 function today(){
   const d=new Date();
-  const dt=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;
-  const tm=`${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}${String(d.getSeconds()).padStart(2,"0")}`;
-  return `${dt}_${tm}`;
+  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}_${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}${String(d.getSeconds()).padStart(2,"0")}`;
+}
+function countDups(rows,mk){
+  const c={};
+  for(const r of rows){const k=String(r[mk]??"").trim();if(k)c[k]=(c[k]||0)+1;}
+  let u=0,d=0;
+  for(const n of Object.values(c)){if(n===1)u++;else d+=n;}
+  return{unique:u,duped:d};
+}
+function getPT(row){
+  const pt=String(row["Payment Type"]??"").trim().toLowerCase();
+  if(pt==="incentive")return"Incentive";
+  if(pt==="salary and incentive"||pt==="salary & incentive")return"SalaryAndIncentive";
+  return"Salary";
 }
 
-// ── Raw sheet: no styling for performance ────────────────────────────────────
-function buildRaw(rows){return XLSX.utils.json_to_sheet(rows,{defval:""});}
+// ── Excel helpers ─────────────────────────────────────────────────────────────
+const P={navy:"1E3A5F",blue:"2563EB",teal:"0D9488",green:"16A34A",red:"DC2626",amber:"D97706",purple:"7C3AED",
+  lgrey:"F3F4F6",lred:"FEE2E2",lgreen:"DCFCE7",lyellow:"FEF9C3",lblue:"DBEAFE",lteal:"CCFBF1",lpurple:"EDE9FE",
+  white:"FFFFFF",text:"111827",muted:"6B7280"};
+const fs=hex=>({patternType:"solid",fgColor:{rgb:hex}});
+const nf=()=>({patternType:"none"});
+function cl(v,o={}){
+  const{bold=false,italic=false,sz=9,fc=P.text,bg=null,align="left",fmt=null,border=true}=o;
+  const b=border?{top:{style:"thin",color:{rgb:"E5E7EB"}},bottom:{style:"thin",color:{rgb:"E5E7EB"}},left:{style:"thin",color:{rgb:"E5E7EB"}},right:{style:"thin",color:{rgb:"E5E7EB"}}}:{};
+  return{v,t:typeof v==="number"?"n":"s",s:{font:{bold,italic,sz,color:{rgb:fc}},alignment:{horizontal:align,vertical:"center"},fill:bg?fs(bg):nf(),border:b},...(fmt?{z:fmt}:{})};
+}
+const hd=(v,bg=P.navy,align="center")=>cl(v,{bold:true,fc:P.white,bg,align});
+const nc=(v,bg=null,fc=P.text)=>v===null?cl("",{bg,fc,align:"right"}):cl(v,{bg,fc,align:"right",fmt:"#,##0.00"});
+const en=(r,c)=>XLSX.utils.encode_cell({r,c});
+const sr=(ws,R,C)=>{ws["!ref"]=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:R,c:C}});};
+const cw=arr=>arr.map(w=>({wch:w}));
+const mg=(s,e)=>({s,e});
 
-// ── Single-pass (Truck Rental Cost) ──────────────────────────────────────────
-function buildSinglePass(domain,matchKey,offRaw,sysRaw,post){
-  post("Building index...");
-  const getCostCols=rows=>!rows.length?[]:Object.keys(rows[0]).filter(c=>c!==matchKey&&c!=="Billing ID"&&isCostCol(c));
-  const costColsAll=getCostCols(offRaw);
-  const totalCols=costColsAll.filter(isTotalCol);
-  const compCols=costColsAll.filter(c=>!isTotalCol(c));
-  const infoCols=Object.keys(offRaw[0]||{}).filter(c=>c!==matchKey&&!costColsAll.includes(c));
-
-  function buildIdx(rows){
-    const idx={},rawMap={};
-    for(const row of rows){const k=String(row[matchKey]??"").trim();if(!k)continue;
-      if(!idx[k]){idx[k]={};rawMap[k]={...row};for(const c of costColsAll)idx[k][c]=parseVal(row[c]);}
-      else{for(const c of costColsAll){const ex=idx[k][c],nv=parseVal(row[c]);if(nv!==null)idx[k][c]=f2((ex??0)+nv);}}}
-    return{idx,rawMap};
+function buildIdx(rows,mk,costCols){
+  const idx={},rm={};
+  for(const row of rows){
+    const k=String(row[mk]??"").trim();if(!k)continue;
+    if(!idx[k]){idx[k]={};rm[k]={...row};for(const c of costCols)idx[k][c]=parseVal(row[c]);}
+    else{for(const c of costCols){const ex=idx[k][c],nv=parseVal(row[c]);if(nv!==null)idx[k][c]=f2((ex??0)+nv);}}
   }
-  const{idx:offIdx,rawMap:offRawMap}=buildIdx(offRaw);
-  const{idx:sysIdx,rawMap:sysRawMap}=buildIdx(sysRaw);
-  const offKeys=Object.keys(offIdx),sysKeys=Object.keys(sysIdx);
-  const matchedKeys=offKeys.filter(k=>sysIdx[k]);
-  const offOnlyKeys=offKeys.filter(k=>!sysIdx[k]);
-  const sysOnlyKeys=sysKeys.filter(k=>!offIdx[k]);
-  const sysSuccessRows=sysRaw.filter(r=>r["Billing Status"]==="Success");
-  const sysFailRows=sysRaw.filter(r=>r["Billing Status"]==="Fail");
-  const sysDup=countDuplicates(sysRaw,matchKey),offDup=countDuplicates(offRaw,matchKey);
-
-  function cmp(k){const res={};for(const c of costColsAll){const ov=offIdx[k]?.[c]??null,sv=sysIdx[k]?.[c]??null;res[c]={ov,sv,diff:f2(orZero(sv)-orZero(ov)),match:orZero(ov)===orZero(sv)};}return res;}
-  const fullMatchKeys=matchedKeys.filter(k=>costColsAll.every(c=>cmp(k)[c].match));
-  const mismatchKeys=matchedKeys.filter(k=>!costColsAll.every(c=>cmp(k)[c].match));
-
-  function calcAcc(){
-    let num=0,den=0;
-    const cols=compCols.length?compCols:costColsAll;
-    for(const k of offKeys) den+=cols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
-    for(const k of matchedKeys){const comparison=cmp(k);for(const c of cols){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
-    return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
-  }
-  function compStat(c){
-    const offTotal=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);
-    const sysTotal=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);
-    const variance=f2(sysTotal-offTotal);
-    const varPct=offTotal!==0?`${((variance/Math.abs(offTotal))*100).toFixed(1)}%`:"N/A";
-    return{offTotal:f2(offTotal),sysTotal:f2(sysTotal),variance,varPct};
-  }
-
-  post("Building summary sheet...");
-  function buildSummary(){
-    const ws={},mrgs=[];let r=0;const W=5;
-    const st=(t,bg)=>{ws[enc(r,0)]=cell(t,{bold:true,sz:9,fc:P.white,bg});mrgs.push(mrg({r,c:0},{r,c:W}));r++;};
-    const r2=(l,v,bg,sub="",vb=true)=>{ws[enc(r,0)]=cell(l,{bg,sz:9});mrgs.push(mrg({r,c:0},{r,c:3}));ws[enc(r,4)]=cell(typeof v==="number"?v:String(v),{bg,sz:9,align:"right",bold:vb});ws[enc(r,5)]=cell(sub,{bg,fc:P.muted,sz:8,align:"center"});r++;};
-    const th=(labels,bg=P.lblue)=>{labels.forEach((h,i)=>{ws[enc(r,i)]=cell(h,{bold:true,sz:8,fc:P.navy,bg,align:i===0?"left":"center"});});r++;};
-    ws[enc(r,0)]=cell(`${domain} Reconciliation Report`,{bold:true,sz:14,fc:P.navy,align:"center",border:false});mrgs.push(mrg({r,c:0},{r,c:W}));r++;
-    ws[enc(r,0)]=cell(`Generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})} ${new Date().toLocaleTimeString()}`,{italic:true,sz:8,fc:P.muted,align:"center",border:false});mrgs.push(mrg({r,c:0},{r,c:W}));r+=2;
-    st("SYSTEM FILE",P.navy);
-    r2("Total rows in System File",sysRaw.length,P.lgrey);
-    r2("  ↳  Unique IDs",sysDup.unique,P.lgrey,"(IDs appearing exactly once)");
-    r2("  ↳  Duplicated IDs",sysDup.duped,P.lgrey,"(total rows of IDs appearing >1 time)",false);
-    r2("  ↳  Billing Status: Success",sysSuccessRows.length,P.lgreen,"(all rows incl. duplicates)");
-    r2("  ↳  Billing Status: Fail",sysFailRows.length,P.lred,"(all rows incl. duplicates)");
-    r2("Overall Accuracy %",calcAcc(),P.lteal);r++;
-    st("RECONCILIATION SUMMARY",P.teal);
-    r2("Offline File — Total rows",offRaw.length,P.lgrey);r2("Offline File — Unique IDs",offDup.unique,P.lgrey,"(IDs appearing exactly once)");r2("Offline File — Duplicated IDs",offDup.duped,P.lgrey,"(total rows appearing >1 time)",false);
-    r2("System File — Total rows",sysRaw.length,P.lgrey);r2("System File — Unique IDs",sysDup.unique,P.lgrey,"(IDs appearing exactly once)");r2("System File — Duplicated IDs",sysDup.duped,P.lgrey,"(total rows appearing >1 time)",false);r++;
-    r2("IDs in both Offline & System",matchedKeys.length,P.lblue,pct(matchedKeys.length,offKeys.length)+" of offline");
-    r2("IDs in Offline only",offOnlyKeys.length,P.lred,pct(offOnlyKeys.length,offKeys.length)+" of offline");
-    r2("IDs in System only",sysOnlyKeys.length,P.lyellow,pct(sysOnlyKeys.length,sysKeys.length)+" of system");
-    r2("Full Match IDs",fullMatchKeys.length,P.lgreen,pct(fullMatchKeys.length,offKeys.length)+" of offline");
-    r2("Overall Accuracy %",calcAcc(),P.lteal);r++;
-    st("COST COMPONENTS BREAKDOWN",P.teal);
-    th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %"]);
-    for(const c of [...compCols,...totalCols]){const isTot=isTotalCol(c);const cs=compStat(c);const bad=cs.variance!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
-      ws[enc(r,0)]=cell(c,{sz:9,bg,bold:isTot});ws[enc(r,1)]=numCell(cs.offTotal,bg);ws[enc(r,2)]=numCell(cs.sysTotal,bg);ws[enc(r,3)]=numCell(cs.variance,bg,cs.variance<0?P.red:cs.variance>0?P.green:P.text);ws[enc(r,4)]=cell(cs.varPct,{sz:9,bg,fc,align:"center",bold:isTot});r++;}
-    ws["!merges"]=mrgs;setRef(ws,r,W);ws["!cols"]=colW([34,16,16,16,12]);ws["!rows"]=Array(r+1).fill({hpt:18});return ws;
-  }
-
-  function buildDetail(keys,titleText,titleBg,diffAlwaysZero=false){
-    const ws={},mrgs=[];let r=0;
-    const fixedH=[matchKey,...infoCols];
-    const totalC=fixedH.length+costColsAll.length*3-1;
-    // Title
-    ws[enc(r,0)]=cell(`${titleText} — ${keys.length} records`,{bold:true,sz:10,fc:P.white,bg:titleBg,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    // Group headers
-    fixedH.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});
-    let c=fixedH.length;
-    for(const comp of costColsAll){ws[enc(r,c)]=hdr(comp,P.blue);mrgs.push(mrg({r,c},{r,c:c+2}));c+=3;}r++;
-    // Sub-headers
-    fixedH.forEach((_,i)=>{ws[enc(r,i)]=hdr("",P.navy);});c=fixedH.length;
-    for(const _ of costColsAll){["Offline","System","Diff"].forEach((s,i)=>{ws[enc(r,c+i)]=hdr(s,P.blue);});c+=3;}r++;
-    // Data rows — plain values only (no per-cell styling) for performance
-    for(const k of keys){
-      const rawRow=offRawMap[k]||sysRawMap[k]||{};
-      const comparison=(offIdx[k]&&sysIdx[k])?cmp(k):null;
-      let col=0;
-      ws[enc(r,col++)]=cell(k,{sz:9});
-      for(const inf of infoCols) ws[enc(r,col++)]=cell(String(rawRow[inf]??""),{sz:9});
-      for(const comp of costColsAll){
-        const ov=comparison?comparison[comp].ov:(offIdx[k]?.[comp]??null);
-        const sv=comparison?comparison[comp].sv:null;
-        const diff=comparison?comparison[comp].diff:null;
-        const match=comparison?comparison[comp].match:true;
-        // Plain numeric cells for data rows
-        ws[enc(r,col++)]={v:ov===null?"":ov, t:ov===null?"s":"n", z:"#,##0.00"};
-        ws[enc(r,col++)]={v:sv===null?"":sv, t:sv===null?"s":"n", z:"#,##0.00"};
-        const dv=diffAlwaysZero?0:(diff??0);
-        ws[enc(r,col++)]={v:dv, t:"n", z:"#,##0.00"};
-      }r++;
-    }
-    ws["!merges"]=mrgs;setRef(ws,r,totalC);
-    ws["!cols"]=colW([16,...infoCols.map(()=>14),...costColsAll.flatMap(()=>[13,13,11])]);
-    return ws;
-  }
-
-  function buildOfflineOnly(){
-    const ws={},mrgs=[];let r=0;const hdrs=[matchKey,...infoCols,...costColsAll];const totalC=hdrs.length-1;
-    ws[enc(r,0)]=cell(`Offline Only — ${offOnlyKeys.length} records`,{bold:true,sz:10,fc:P.white,bg:P.red,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    hdrs.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});r++;
-    for(const k of offOnlyKeys){
-      const row=offRawMap[k]||{};let col=0;
-      ws[enc(r,col++)]={v:k,t:"s"};
-      for(const inf of infoCols) ws[enc(r,col++)]={v:String(row[inf]??""),t:"s"};
-      for(const comp of costColsAll){const v=offIdx[k]?.[comp]??null;ws[enc(r,col++)]={v:v===null?"":v,t:v===null?"s":"n",z:"#,##0.00"};}
-      r++;
-    }
-    ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=colW([16,...infoCols.map(()=>14),...costColsAll.map(()=>14)]);return ws;
-  }
-
-  function buildFailed(){
-    const failedRows=sysRaw.filter(r=>r["Billing Status"]==="Fail");
-    const ws={},mrgs=[];let r=0;const hdrs=failedRows.length?Object.keys(failedRows[0]):[matchKey];const totalC=Math.max(hdrs.length-1,0);
-    ws[enc(r,0)]=cell(`Failed Billing Orders — ${failedRows.length} records`,{bold:true,sz:10,fc:P.white,bg:P.amber,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    hdrs.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});r++;
-    for(const row of failedRows){hdrs.forEach((h,i)=>{const v=row[h]??"";ws[enc(r,i)]=typeof v==="number"?numCell(v,P.lyellow):cell(String(v),{sz:9,bg:P.lyellow});});r++;}
-    ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=hdrs.map(()=>({wch:16}));return ws;
-  }
-
-  const wb=XLSX.utils.book_new();
-  post("Writing sheets...");
-  XLSX.utils.book_append_sheet(wb,buildSummary(),"Summary");
-  post("Writing Matched Records...");
-  XLSX.utils.book_append_sheet(wb,buildDetail(fullMatchKeys,"Matched Records",P.green,true),"Matched Records");
-  post("Writing Mismatch Records...");
-  XLSX.utils.book_append_sheet(wb,buildDetail(mismatchKeys,"Mismatch Records",P.red,false),"Mismatch Records");
-  post("Writing Offline Only...");
-  XLSX.utils.book_append_sheet(wb,buildOfflineOnly(),"Offline Only");
-  XLSX.utils.book_append_sheet(wb,buildFailed(),"Failed Billing Orders");
-  post("Writing raw sheets...");
-  XLSX.utils.book_append_sheet(wb,buildRaw(sysRaw),"Raw System File");
-  XLSX.utils.book_append_sheet(wb,buildRaw(offRaw),"Raw Offline File");
-  return wb;
+  return{idx,rm};
 }
 
-// ── Split-pass (Driver Cost / Labor Payroll) ─────────────────────────────────
-function buildSplitPass(domain,matchKey,offRaw,sysRaw,post){
-  const PASSES=[
-    {key:"Salary",label:"Salary",filter:r=>getPaymentType(r)==="Salary",bg:P.teal,hdrBg:P.teal},
-    {key:"Incentive",label:"Incentive",filter:r=>getPaymentType(r)==="Incentive",bg:P.purple,hdrBg:P.purple},
-    {key:"SalaryAndIncentive",label:"Salary and Incentive",filter:r=>getPaymentType(r)==="SalaryAndIncentive",bg:"B45309",hdrBg:"B45309"},
-  ];
+function cmpKeys(k,offIdx,sysIdx,cols){
+  const res={};
+  for(const c of cols){const ov=offIdx[k]?.[c]??null,sv=sysIdx[k]?.[c]??null;res[c]={ov,sv,diff:f2(orZero(sv)-orZero(ov)),match:orZero(ov)===orZero(sv)};}
+  return res;
+}
 
-  post("Splitting by Payment Type...");
-  const passes=PASSES.map(p=>{
-    const offRows=offRaw.filter(p.filter),sysRows=sysRaw.filter(p.filter);
+function calcAccuracy(offKeys,matchedKeys,offIdx,cmp,compCols,costColsAll){
+  const cols=compCols.length?compCols:costColsAll;
+  let num=0,den=0;
+  for(const k of offKeys)den+=cols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
+  for(const k of matchedKeys){const cp=cmp(k);for(const c of cols){if(cp[c].match)num+=orZero(offIdx[k]?.[c]);}}
+  return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
+}
+
+function compStat(c,offKeys,matchedKeys,offIdx,sysIdx,cmp){
+  const ot=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);
+  const st=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);
+  const v=f2(st-ot);
+  return{ot:f2(ot),st:f2(st),v,vp:ot!==0?`${((v/Math.abs(ot))*100).toFixed(1)}%`:"N/A"};
+}
+
+// ── Summary sheet ─────────────────────────────────────────────────────────────
+function buildSummary(domain,sysRaw,mk,passes,sysDup,sysSucc,sysFail,uniqueSysIDs,overallAcc){
+  const ws={},mrgs=[];let r=0;const W=5;
+  const st=(t,bg)=>{ws[en(r,0)]=cl(t,{bold:true,sz:9,fc:P.white,bg});mrgs.push(mg({r,c:0},{r,c:W}));r++;};
+  const r2=(l,v,bg,sub="",vb=true)=>{ws[en(r,0)]=cl(l,{bg,sz:9});mrgs.push(mg({r,c:0},{r,c:3}));ws[en(r,4)]=cl(typeof v==="number"?v:String(v),{bg,sz:9,align:"right",bold:vb});ws[en(r,5)]=cl(sub,{bg,fc:P.muted,sz:8,align:"center"});r++;};
+  const th=(labels,bg=P.lblue)=>{labels.forEach((h,i)=>{ws[en(r,i)]=cl(h,{bold:true,sz:8,fc:P.navy,bg,align:i===0?"left":"center"});});r++;};
+
+  ws[en(r,0)]=cl(`${domain} Reconciliation Report`,{bold:true,sz:14,fc:P.navy,align:"center",border:false});mrgs.push(mg({r,c:0},{r,c:W}));r++;
+  ws[en(r,0)]=cl(`Generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})} ${new Date().toLocaleTimeString()}`,{italic:true,sz:8,fc:P.muted,align:"center",border:false});mrgs.push(mg({r,c:0},{r,c:W}));r+=2;
+
+  st("SYSTEM FILE",P.navy);
+  r2("Total rows in System File",sysRaw.length,P.lgrey);
+  r2("Total Unique Driver IDs",uniqueSysIDs,P.lgrey,"(COUNTA of unique Driver IDs)");
+  r2("  ↳  Unique IDs (appearing exactly once)",sysDup.unique,P.lgrey);
+  r2("  ↳  Duplicated IDs (total rows of IDs appearing >1 time)",sysDup.duped,P.lgrey,"",false);
+  r2("  ↳  Billing Status: Success",sysSucc,P.lgreen,"(all rows incl. duplicates)");
+  r2("  ↳  Billing Status: Fail",sysFail,P.lred,"(all rows incl. duplicates)");
+  r2("Overall Accuracy %",overallAcc,P.lteal);r++;
+
+  for(const p of passes){
+    if(!p.offRows.length&&!p.sysRows.length)continue;
+    const lpBg=p.bg===P.teal?P.lblue:p.bg===P.purple?P.lpurple:"FEF3C7";
+    st(`${p.label.toUpperCase()} COMPONENTS BREAKDOWN`,p.bg);
+    th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %"],lpBg);
+    for(const c of [...p.compCols,...p.totalCols]){
+      const isTot=isTotalCol(c),cs=compStat(c,p.offKeys,p.matchedKeys,p.offIdx,p.sysIdx,p.cmp);
+      const bad=cs.v!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
+      ws[en(r,0)]=cl(c,{sz:9,bg,bold:isTot});ws[en(r,1)]=nc(cs.ot,bg);ws[en(r,2)]=nc(cs.st,bg);
+      ws[en(r,3)]=nc(cs.v,bg,cs.v<0?P.red:cs.v>0?P.green:P.text);
+      ws[en(r,4)]=cl(cs.vp,{sz:9,bg,fc,align:"center",bold:isTot});r++;
+    }
+    ws[en(r,0)]=cl(`${p.label} Accuracy %`,{sz:9,bg:P.lteal,bold:true});mrgs.push(mg({r,c:0},{r,c:3}));
+    ws[en(r,4)]=cl(p.acc,{sz:9,bg:P.lteal,fc:P.teal,bold:true,align:"center"});r++;r++;
+  }
+  ws["!merges"]=mrgs;sr(ws,r,W);ws["!cols"]=cw([34,16,16,16,12]);ws["!rows"]=Array(r+1).fill({hpt:18});
+  return ws;
+}
+
+// ── Lightweight detail sheet using aoa ────────────────────────────────────────
+function buildDetailAoa(passes,getKeys,titleText,titleBg,diffZero=false){
+  const ws={},mrgs=[];let r=0;
+  const maxC=Math.max(...passes.map(p=>p.costColsAll.length),1);
+  const baseInfo=passes[0]?.infoCols||[];
+  const totalC=1+baseInfo.length+maxC*3;
+  ws[en(r,0)]=cl(titleText,{bold:true,sz:10,fc:P.white,bg:titleBg,align:"center"});mrgs.push(mg({r,c:0},{r,c:totalC}));r++;
+
+  for(const p of passes){
+    const keys=getKeys(p);
+    if(!keys.length)continue;
+    const fH=[p.mk,...p.infoCols];const pC=fH.length+p.costColsAll.length*3-1;
+    ws[en(r,0)]=cl(`${p.label} — ${keys.length} records`,{bold:true,sz:9,fc:P.white,bg:p.bg});mrgs.push(mg({r,c:0},{r,c:pC}));r++;
+    fH.forEach((h,i)=>{ws[en(r,i)]=hd(h,P.navy,i===0?"left":"center");});
+    let c=fH.length;
+    for(const comp of p.costColsAll){ws[en(r,c)]=hd(comp,P.blue);mrgs.push(mg({r,c},{r,c:c+2}));c+=3;}r++;
+    fH.forEach((_,i)=>{ws[en(r,i)]=hd("",P.navy);});c=fH.length;
+    for(const _ of p.costColsAll){["Offline","System","Diff"].forEach((s,i)=>{ws[en(r,c+i)]=hd(s,P.blue);});c+=3;}r++;
+    const hdrEnd=r;
+    const aoa=keys.map(k=>{
+      const raw=p.offRm[k]||p.sysRm[k]||{};
+      const cp=(p.offIdx[k]&&p.sysIdx[k])?p.cmp(k):null;
+      const row=[String(k)];
+      for(const inf of p.infoCols)row.push(String(raw[inf]??""));
+      for(const comp of p.costColsAll){
+        const ov=cp?cp[comp].ov:(p.offIdx[k]?.[comp]??null);
+        const sv=cp?cp[comp].sv:null;
+        const dv=diffZero?0:(cp?cp[comp].diff:0)??0;
+        row.push(ov===null?"":ov,sv===null?"":sv,dv);
+      }
+      return row;
+    });
+    if(aoa.length){
+      const tmp=XLSX.utils.aoa_to_sheet(aoa);
+      const rng=XLSX.utils.decode_range(tmp["!ref"]||"A1:A1");
+      for(let dr=0;dr<=rng.e.r;dr++)for(let dc=0;dc<=rng.e.c;dc++){
+        const s=XLSX.utils.encode_cell({r:dr,c:dc}),d=XLSX.utils.encode_cell({r:hdrEnd+dr,c:dc});
+        if(tmp[s])ws[d]=tmp[s];
+      }
+      r=hdrEnd+aoa.length;
+    }
+    r++;
+  }
+  ws["!merges"]=mrgs;sr(ws,r,totalC);ws["!cols"]=cw([16,...baseInfo.map(()=>14),...Array(maxC*3).fill(13)]);
+  return ws;
+}
+
+function buildOfflineOnlyAoa(passes){
+  const ws={},mrgs=[];let r=0;
+  const maxC=Math.max(...passes.map(p=>p.costColsAll.length),1);
+  const totalC=1+(passes[0]?.infoCols?.length||0)+maxC;
+  ws[en(r,0)]=cl("OFFLINE ONLY RECORDS",{bold:true,sz:10,fc:P.white,bg:P.red,align:"center"});mrgs.push(mg({r,c:0},{r,c:totalC}));r++;
+  for(const p of passes){
+    if(!p.offOnlyKeys.length)continue;
+    const hdrs=[p.mk,...p.infoCols,...p.costColsAll];const tC=hdrs.length-1;
+    ws[en(r,0)]=cl(`${p.label} — ${p.offOnlyKeys.length} records not found in System File`,{bold:true,sz:9,fc:P.white,bg:p.bg});mrgs.push(mg({r,c:0},{r,c:tC}));r++;
+    hdrs.forEach((h,i)=>{ws[en(r,i)]=hd(h,P.navy,i===0?"left":"center");});r++;
+    const aoa=p.offOnlyKeys.map(k=>{
+      const row=p.offRm[k]||{};
+      return[String(k),...p.infoCols.map(inf=>String(row[inf]??"")), ...p.costColsAll.map(comp=>{const v=p.offIdx[k]?.[comp]??null;return v===null?"":v;})];
+    });
+    if(aoa.length){
+      const tmp=XLSX.utils.aoa_to_sheet(aoa);
+      const rng=XLSX.utils.decode_range(tmp["!ref"]||"A1:A1");
+      for(let dr=0;dr<=rng.e.r;dr++)for(let dc=0;dc<=rng.e.c;dc++){const s=XLSX.utils.encode_cell({r:dr,c:dc}),d=XLSX.utils.encode_cell({r:r+dr,c:dc});if(tmp[s])ws[d]=tmp[s];}
+      r+=aoa.length;
+    }
+    r++;
+  }
+  ws["!merges"]=mrgs;sr(ws,r,totalC);ws["!cols"]=cw([16,...(passes[0]?.infoCols||[]).map(()=>14),...Array(maxC).fill(14)]);
+  return ws;
+}
+
+function buildFailed(sysRaw,mk){
+  const rows=sysRaw.filter(r=>r["Billing Status"]==="Fail");
+  const ws={},mrgs=[];let r=0;
+  const hdrs=rows.length?Object.keys(rows[0]):[mk];const tC=Math.max(hdrs.length-1,0);
+  ws[en(r,0)]=cl(`Failed Billing Orders — ${rows.length} records`,{bold:true,sz:10,fc:P.white,bg:P.amber,align:"center"});mrgs.push(mg({r,c:0},{r,c:tC}));r++;
+  hdrs.forEach((h,i)=>{ws[en(r,i)]=hd(h,P.navy,i===0?"left":"center");});r++;
+  const aoa=rows.map(row=>hdrs.map(h=>{const v=row[h]??"";return v;}));
+  if(aoa.length){
+    const tmp=XLSX.utils.aoa_to_sheet(aoa);
+    const rng=XLSX.utils.decode_range(tmp["!ref"]||"A1:A1");
+    for(let dr=0;dr<=rng.e.r;dr++)for(let dc=0;dc<=rng.e.c;dc++){const s=XLSX.utils.encode_cell({r:dr,c:dc}),d=XLSX.utils.encode_cell({r:r+dr,c:dc});if(tmp[s])ws[d]=tmp[s];}
+    r+=aoa.length;
+  }
+  ws["!merges"]=mrgs;sr(ws,r,tC);ws["!cols"]=hdrs.map(()=>({wch:16}));return ws;
+}
+
+// ── Main process function ─────────────────────────────────────────────────────
+async function processFiles(domain,matchKey,splitPaymentType,offRaw,sysRaw,setProgress){
+  const PASS_DEFS=splitPaymentType?[
+    {key:"Salary",          label:"Salary",             bg:P.teal,   filter:r=>getPT(r)==="Salary"},
+    {key:"Incentive",       label:"Incentive",          bg:P.purple, filter:r=>getPT(r)==="Incentive"},
+    {key:"SalaryAndIncentive",label:"Salary and Incentive",bg:"B45309",filter:r=>getPT(r)==="SalaryAndIncentive"},
+  ]:[{key:"All",label:"All",bg:P.teal,filter:()=>true}];
+
+  setProgress("Building indexes...");
+  await new Promise(res=>setTimeout(res,10));
+
+  const passes=PASS_DEFS.map(pd=>{
+    const offRows=offRaw.filter(pd.filter),sysRows=sysRaw.filter(pd.filter);
     const costColsAll=!offRows.length?[]:Object.keys(offRows[0]).filter(c=>c!==matchKey&&c!=="Billing ID"&&isCostCol(c));
     const totalCols=costColsAll.filter(isTotalCol),compCols=costColsAll.filter(c=>!isTotalCol(c));
     const infoCols=Object.keys(offRows[0]||offRaw[0]||{}).filter(c=>c!==matchKey&&!costColsAll.includes(c));
-    function buildIdx(rows){const idx={},rawMap={};for(const row of rows){const k=String(row[matchKey]??"").trim();if(!k)continue;if(!idx[k]){idx[k]={};rawMap[k]={...row};for(const c of costColsAll)idx[k][c]=parseVal(row[c]);}else{for(const c of costColsAll){const ex=idx[k][c],nv=parseVal(row[c]);if(nv!==null)idx[k][c]=f2((ex??0)+nv);}}}return{idx,rawMap};}
-    const{idx:offIdx,rawMap:offRawMap}=buildIdx(offRows);const{idx:sysIdx,rawMap:sysRawMap}=buildIdx(sysRows);
+    const{idx:offIdx,rm:offRm}=buildIdx(offRows,matchKey,costColsAll);
+    const{idx:sysIdx,rm:sysRm}=buildIdx(sysRows,matchKey,costColsAll);
     const offKeys=Object.keys(offIdx),sysKeys=Object.keys(sysIdx);
     const matchedKeys=offKeys.filter(k=>sysIdx[k]),offOnlyKeys=offKeys.filter(k=>!sysIdx[k]),sysOnlyKeys=sysKeys.filter(k=>!offIdx[k]);
-    const dup={off:countDuplicates(offRows,matchKey),sys:countDuplicates(sysRows,matchKey)};
-    function cmp(k){const res={};for(const c of costColsAll){const ov=offIdx[k]?.[c]??null,sv=sysIdx[k]?.[c]??null;res[c]={ov,sv,diff:f2(orZero(sv)-orZero(ov)),match:orZero(ov)===orZero(sv)};}return res;}
+    const cmp=k=>cmpKeys(k,offIdx,sysIdx,costColsAll);
     const fullMatchKeys=matchedKeys.filter(k=>costColsAll.every(c=>cmp(k)[c].match));
     const mismatchKeys=matchedKeys.filter(k=>!costColsAll.every(c=>cmp(k)[c].match));
-    function calcAcc(){
-      let num=0,den=0;
-      const cols=compCols.length?compCols:costColsAll;
-      for(const k of offKeys) den+=cols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
-      for(const k of matchedKeys){const comparison=cmp(k);for(const c of cols){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
-      return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
-    }
-    function compStat(c){const offTotal=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);const sysTotal=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);const variance=f2(sysTotal-offTotal);const varPct=offTotal!==0?`${((variance/Math.abs(offTotal))*100).toFixed(1)}%`:"N/A";return{offTotal:f2(offTotal),sysTotal:f2(sysTotal),variance,varPct};}
-    return{...p,offRows,sysRows,costColsAll,totalCols,compCols,infoCols,offIdx,sysIdx,offRawMap,sysRawMap,offKeys,sysKeys,matchedKeys,offOnlyKeys,sysOnlyKeys,dup,cmp,fullMatchKeys,mismatchKeys,calcAcc,compStat};
+    const acc=calcAccuracy(offKeys,matchedKeys,offIdx,cmp,compCols,costColsAll);
+    return{...pd,mk:matchKey,offRows,sysRows,costColsAll,totalCols,compCols,infoCols,
+      offIdx,sysIdx,offRm,sysRm,offKeys,sysKeys,matchedKeys,offOnlyKeys,sysOnlyKeys,cmp,fullMatchKeys,mismatchKeys,acc};
   });
 
-  const sysSuccessRows=sysRaw.filter(r=>r["Billing Status"]==="Success");
-  const sysFailRows=sysRaw.filter(r=>r["Billing Status"]==="Fail");
-  const sysDupAll=countDuplicates(sysRaw,matchKey);
+  const sysDup=countDups(sysRaw,matchKey);
   const uniqueSysIDs=new Set(sysRaw.map(r=>String(r[matchKey]??"").trim()).filter(Boolean)).size;
+  const sysSucc=sysRaw.filter(r=>r["Billing Status"]==="Success").length;
+  const sysFail=sysRaw.filter(r=>r["Billing Status"]==="Fail").length;
 
-  function calcOverallAcc(){
+  let overallAcc;
+  if(splitPaymentType){
     let num=0,den=0;
-    for(const p of passes){
-      const cols=p.compCols.length?p.compCols:p.costColsAll;
-      for(const k of p.offKeys) den+=cols.reduce((s,c)=>s+orZero(p.offIdx[k]?.[c]),0);
-      for(const k of p.matchedKeys){const comparison=p.cmp(k);for(const c of cols){if(comparison[c].match)num+=orZero(p.offIdx[k]?.[c]);}}
-    }
-    return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
+    for(const p of passes){const cols=p.compCols.length?p.compCols:p.costColsAll;for(const k of p.offKeys)den+=cols.reduce((s,c)=>s+orZero(p.offIdx[k]?.[c]),0);for(const k of p.matchedKeys){const cp=p.cmp(k);for(const c of cols){if(cp[c].match)num+=orZero(p.offIdx[k]?.[c]);}}}
+    overallAcc=den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
+  } else {
+    overallAcc=passes[0].acc;
   }
 
-  post("Building summary sheet...");
-  function buildSummary(){
-    const ws={},mrgs=[];let r=0;const W=5;
-    const st=(t,bg)=>{ws[enc(r,0)]=cell(t,{bold:true,sz:9,fc:P.white,bg});mrgs.push(mrg({r,c:0},{r,c:W}));r++;};
-    const r2=(l,v,bg,sub="",vb=true)=>{ws[enc(r,0)]=cell(l,{bg,sz:9});mrgs.push(mrg({r,c:0},{r,c:3}));ws[enc(r,4)]=cell(typeof v==="number"?v:String(v),{bg,sz:9,align:"right",bold:vb});ws[enc(r,5)]=cell(sub,{bg,fc:P.muted,sz:8,align:"center"});r++;};
-    const th=(labels,bg=P.lblue)=>{labels.forEach((h,i)=>{ws[enc(r,i)]=cell(h,{bold:true,sz:8,fc:P.navy,bg,align:i===0?"left":"center"});});r++;};
-    ws[enc(r,0)]=cell(`${domain} Reconciliation Report`,{bold:true,sz:14,fc:P.navy,align:"center",border:false});mrgs.push(mrg({r,c:0},{r,c:W}));r++;
-    ws[enc(r,0)]=cell(`Generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})} ${new Date().toLocaleTimeString()}`,{italic:true,sz:8,fc:P.muted,align:"center",border:false});mrgs.push(mrg({r,c:0},{r,c:W}));r+=2;
-    st("SYSTEM FILE",P.navy);
-    r2("Total rows in System File",sysRaw.length,P.lgrey);
-    r2("Total Unique Driver IDs",uniqueSysIDs,P.lgrey,"(COUNTA of unique Driver IDs)");
-    r2("  ↳  Unique IDs (appearing exactly once)",sysDupAll.unique,P.lgrey);
-    r2("  ↳  Duplicated IDs (total rows of IDs appearing >1 time)",sysDupAll.duped,P.lgrey,"",false);
-    r2("  ↳  Billing Status: Success",sysSuccessRows.length,P.lgreen,"(all rows incl. duplicates)");
-    r2("  ↳  Billing Status: Fail",sysFailRows.length,P.lred,"(all rows incl. duplicates)");
-    r2("Overall Accuracy %",calcOverallAcc(),P.lteal);r++;
-    for(const p of passes){
-      if(!p.offRows.length&&!p.sysRows.length) continue;
-      const lpBg=p.bg===P.teal?P.lblue:p.bg===P.purple?P.lpurple:"FEF3C7";
-      st(`${p.label.toUpperCase()} COMPONENTS BREAKDOWN`,p.bg);
-      th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %"],lpBg);
-      for(const c of [...p.compCols,...p.totalCols]){const isTot=isTotalCol(c);const cs=p.compStat(c);const bad=cs.variance!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
-        ws[enc(r,0)]=cell(c,{sz:9,bg,bold:isTot});ws[enc(r,1)]=numCell(cs.offTotal,bg);ws[enc(r,2)]=numCell(cs.sysTotal,bg);ws[enc(r,3)]=numCell(cs.variance,bg,cs.variance<0?P.red:cs.variance>0?P.green:P.text);ws[enc(r,4)]=cell(cs.varPct,{sz:9,bg,fc,align:"center",bold:isTot});r++;}
-      ws[enc(r,0)]=cell(`${p.label} Accuracy %`,{sz:9,bg:P.lteal,bold:true});
-      mrgs.push(mrg({r,c:0},{r,c:3}));
-      ws[enc(r,4)]=cell(p.calcAcc(),{sz:9,bg:P.lteal,fc:P.teal,bold:true,align:"center"});
-      r++;r++;
-    }
-    ws["!merges"]=mrgs;setRef(ws,r,W);ws["!cols"]=colW([34,16,16,16,12]);ws["!rows"]=Array(r+1).fill({hpt:18});return ws;
-  }
-
-  function buildDetailSheet(getKeys,titleText,titleBg,diffAlwaysZero=false){
-    const ws={},mrgs=[];let r=0;
-    const maxCols=Math.max(...passes.map(p=>p.costColsAll.length),1);
-    const baseInfoCols=passes[0]?.infoCols||[];
-    const totalC=1+baseInfoCols.length+maxCols*3;
-    ws[enc(r,0)]=cell(titleText,{bold:true,sz:10,fc:P.white,bg:titleBg,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    for(const p of passes){
-      const keys=getKeys(p);if(!keys.length&&p.offRows.length===0&&p.sysRows.length===0)continue;
-      const fixedH=[matchKey,...p.infoCols];const pTotalC=fixedH.length+p.costColsAll.length*3-1;
-      ws[enc(r,0)]=cell(`${p.label} (Payment Type: ${p.label}) — ${keys.length} records`,{bold:true,sz:9,fc:P.white,bg:p.bg});mrgs.push(mrg({r,c:0},{r,c:pTotalC}));r++;
-      fixedH.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});let c=fixedH.length;
-      for(const comp of p.costColsAll){ws[enc(r,c)]=hdr(comp,P.blue);mrgs.push(mrg({r,c},{r,c:c+2}));c+=3;}r++;
-      fixedH.forEach((_,i)=>{ws[enc(r,i)]=hdr("",P.navy);});c=fixedH.length;
-      for(const _ of p.costColsAll){["Offline","System","Diff"].forEach((s,i)=>{ws[enc(r,c+i)]=hdr(s,P.blue);});c+=3;}r++;
-      // Plain data rows for performance
-      for(const k of keys){
-        const rawRow=p.offRawMap[k]||p.sysRawMap[k]||{};
-        const comparison=(p.offIdx[k]&&p.sysIdx[k])?p.cmp(k):null;
-        let col=0;
-        ws[enc(r,col++)]={v:k,t:"s"};
-        for(const inf of p.infoCols) ws[enc(r,col++)]={v:String(rawRow[inf]??""),t:"s"};
-        for(const comp of p.costColsAll){
-          const ov=comparison?comparison[comp].ov:(p.offIdx[k]?.[comp]??null);
-          const sv=comparison?comparison[comp].sv:null;
-          const diff=comparison?comparison[comp].diff:null;
-          ws[enc(r,col++)]={v:ov===null?"":ov,t:ov===null?"s":"n",z:"#,##0.00"};
-          ws[enc(r,col++)]={v:sv===null?"":sv,t:sv===null?"s":"n",z:"#,##0.00"};
-          const dv=diffAlwaysZero?0:(diff??0);
-          ws[enc(r,col++)]={v:dv,t:"n",z:"#,##0.00"};
-        }r++;
-      }
-      r++;
-    }
-    ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=colW([16,...baseInfoCols.map(()=>14),...Array(maxCols*3).fill(13)]);return ws;
-  }
-
-  function buildOfflineOnly(){
-    const ws={},mrgs=[];let r=0;
-    const maxCols=Math.max(...passes.map(p=>p.costColsAll.length),1);
-    const totalC=1+(passes[0]?.infoCols?.length||0)+maxCols;
-    ws[enc(r,0)]=cell("OFFLINE ONLY RECORDS",{bold:true,sz:10,fc:P.white,bg:P.red,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    for(const p of passes){
-      if(!p.offOnlyKeys.length)continue;
-      const hdrs=[matchKey,...p.infoCols,...p.costColsAll];const tC=hdrs.length-1;
-      ws[enc(r,0)]=cell(`${p.label} — ${p.offOnlyKeys.length} records not found in System File`,{bold:true,sz:9,fc:P.white,bg:p.bg});mrgs.push(mrg({r,c:0},{r,c:tC}));r++;
-      hdrs.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});r++;
-      for(const k of p.offOnlyKeys){
-        const row=p.offRawMap[k]||{};let col=0;
-        ws[enc(r,col++)]={v:k,t:"s"};
-        for(const inf of p.infoCols) ws[enc(r,col++)]={v:String(row[inf]??""),t:"s"};
-        for(const comp of p.costColsAll){const v=p.offIdx[k]?.[comp]??null;ws[enc(r,col++)]={v:v===null?"":v,t:v===null?"s":"n",z:"#,##0.00"};}
-        r++;
-      }
-      r++;
-    }
-    ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=colW([16,...(passes[0]?.infoCols||[]).map(()=>14),...Array(maxCols).fill(14)]);return ws;
-  }
-
-  function buildFailed(){
-    const failedRows=sysRaw.filter(r=>r["Billing Status"]==="Fail");
-    const ws={},mrgs=[];let r=0;const hdrs=failedRows.length?Object.keys(failedRows[0]):[matchKey];const totalC=Math.max(hdrs.length-1,0);
-    ws[enc(r,0)]=cell(`Failed Billing Orders — ${failedRows.length} records`,{bold:true,sz:10,fc:P.white,bg:P.amber,align:"center"});mrgs.push(mrg({r,c:0},{r,c:totalC}));r++;
-    hdrs.forEach((h,i)=>{ws[enc(r,i)]=hdr(h,P.navy,i===0?"left":"center");});r++;
-    for(const row of failedRows){hdrs.forEach((h,i)=>{const v=row[h]??"";ws[enc(r,i)]=typeof v==="number"?numCell(v,P.lyellow):cell(String(v),{sz:9,bg:P.lyellow});});r++;}
-    ws["!merges"]=mrgs;setRef(ws,r,totalC);ws["!cols"]=hdrs.map(()=>({wch:16}));return ws;
-  }
-
+  setProgress("Building Summary sheet...");await new Promise(res=>setTimeout(res,10));
   const wb=XLSX.utils.book_new();
-  post("Writing Summary...");
-  XLSX.utils.book_append_sheet(wb,buildSummary(),"Summary");
-  post("Writing Matched Records...");
-  XLSX.utils.book_append_sheet(wb,buildDetailSheet(p=>p.fullMatchKeys,"Matched Records — All components match",P.green,true),"Matched Records");
-  post("Writing Mismatch Records...");
-  XLSX.utils.book_append_sheet(wb,buildDetailSheet(p=>p.mismatchKeys,"Mismatch Records — Requires review",P.red,false),"Mismatch Records");
-  post("Writing Offline Only...");
-  XLSX.utils.book_append_sheet(wb,buildOfflineOnly(),"Offline Only");
-  XLSX.utils.book_append_sheet(wb,buildFailed(),"Failed Billing Orders");
-  post("Writing raw sheets...");
-  XLSX.utils.book_append_sheet(wb,buildRaw(sysRaw),"Raw System File");
-  XLSX.utils.book_append_sheet(wb,buildRaw(offRaw),"Raw Offline File");
+  XLSX.utils.book_append_sheet(wb,buildSummary(domain,sysRaw,matchKey,passes,sysDup,sysSucc,sysFail,uniqueSysIDs,overallAcc),"Summary");
+
+  setProgress("Building Matched Records...");await new Promise(res=>setTimeout(res,10));
+  XLSX.utils.book_append_sheet(wb,buildDetailAoa(passes,p=>p.fullMatchKeys,"Matched Records — All components match",P.green,true),"Matched Records");
+
+  setProgress("Building Mismatch Records...");await new Promise(res=>setTimeout(res,10));
+  XLSX.utils.book_append_sheet(wb,buildDetailAoa(passes,p=>p.mismatchKeys,"Mismatch Records — Requires review",P.red,false),"Mismatch Records");
+
+  setProgress("Building Offline Only...");await new Promise(res=>setTimeout(res,10));
+  XLSX.utils.book_append_sheet(wb,buildOfflineOnlyAoa(passes),"Offline Only");
+
+  setProgress("Building Failed Billing Orders...");await new Promise(res=>setTimeout(res,10));
+  XLSX.utils.book_append_sheet(wb,buildFailed(sysRaw,matchKey),"Failed Billing Orders");
+
+  setProgress("Writing raw sheets...");await new Promise(res=>setTimeout(res,10));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sysRaw,{defval:""}),"Raw System File");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(offRaw,{defval:""}),"Raw Offline File");
+
   return wb;
 }
 
-self.onmessage=function(e){
-  const{type,payload}=e.data;
-  if(type==="process"){
-    try{
-      const{domain,matchKey,splitPaymentType,market,billingType,offAB,sysAB}=payload;
-      self.postMessage({type:"progress",msg:"Parsing files..."});
-      const offRaw=readArrayBuffer(offAB);
-      const sysRaw=readArrayBuffer(sysAB);
-      self.postMessage({type:"progress",msg:`Parsed: ${offRaw.length} offline rows, ${sysRaw.length} system rows`});
-      const post=msg=>self.postMessage({type:"progress",msg});
-      const wb=buildWorkbook(domain,matchKey,splitPaymentType,offRaw,sysRaw,post);
-      post("Generating file...");
-      const buf=XLSX.write(wb,{bookType:"xlsx",type:"array"});
-      const btSlug=billingType?`_${billingType.replace(/\s+/g,"_")}` :"";
-      const filename=`Reconciliation_${market}_${domain.replace(/\s+/g,"_")}${btSlug}_${today()}.xlsx`;
-      self.postMessage({type:"done",buf,filename},[buf]);
-    }catch(err){
-      self.postMessage({type:"error",msg:err.message});
-    }
-  }
-};
-</script>
-
-<script type="text/babel">
-const { useState, useCallback, useRef } = React;
-
-const DOMAINS = {
-  "Driver Cost":       { matchKey:"Driver ID", portalPath:"First Mile & Last Mile Cost / Line Haul Cost → Driver Cost", splitPaymentType:true },
-  "Truck Rental Cost": { matchKey:"Agency ID", portalPath:"Line Haul Cost → Truck Rental Cost", splitPaymentType:false,
-    billingTypes:["Trip Billing","TO Billing","MAWB Billing","Period Billing","Contract Task Billing","Master Task Billing","No Show Billing"] },
-  "Labor Payroll":     { matchKey:"Ops ID", portalPath:"Labour Payroll", splitPaymentType:true },
-};
-const MARKETS = ["BR","ID","MY","PH","SG","TH","TW","VN"];
-
+// ── UI ────────────────────────────────────────────────────────────────────────
 const UI={primary:"#2563eb",primaryLight:"#eff6ff",success:"#16a34a",successLight:"#f0fdf4",
-  danger:"#dc2626",dangerLight:"#fef2f2",border:"#e5e7eb",muted:"#6b7280",
-  bg:"#f9fafb",white:"#ffffff",header:"#1e3a5f"};
+  danger:"#dc2626",dangerLight:"#fef2f2",border:"#e5e7eb",muted:"#6b7280",bg:"#f9fafb",white:"#ffffff",header:"#1e3a5f"};
 
 function FileUpload({label,file,onChange}){
   return(
@@ -469,49 +340,30 @@ function App(){
   const[status,setStatus]=useState(null);
   const[progress,setProgress]=useState("");
   const[processing,setProcessing]=useState(false);
-  const workerRef=useRef(null);
-
-  const domainConf=domain?DOMAINS[domain]:null;
-  const needsBilling=domainConf?.billingTypes?.length>0;
+  const dc=domain?DOMAINS[domain]:null;
+  const needsBilling=dc?.billingTypes?.length>0;
   const canRun=market&&domain&&(!needsBilling||billingType)&&sysFile&&offFile;
 
   const run=useCallback(async()=>{
     setProcessing(true);setStatus(null);setProgress("Reading files...");
     try{
       const{matchKey,splitPaymentType}=DOMAINS[domain];
-      const[offAB,sysAB]=await Promise.all([
-        sysFile.arrayBuffer(), offFile.arrayBuffer()
-      ]);
-
-      // Create worker from inline script
-      const workerSrc=document.getElementById("worker-src").textContent;
-      const blob=new Blob([workerSrc],{type:"application/javascript"});
-      const workerUrl=URL.createObjectURL(blob);
-      const worker=new Worker(workerUrl);
-      workerRef.current=worker;
-
-      worker.onmessage=e=>{
-        const{type,msg,buf,filename}=e.data;
-        if(type==="progress"){setProgress(msg);}
-        else if(type==="done"){
-          const blob2=new Blob([buf],{type:"application/octet-stream"});
-          const url=URL.createObjectURL(blob2);
-          const a=document.createElement("a");a.href=url;a.download=filename;a.click();
-          URL.revokeObjectURL(url);URL.revokeObjectURL(workerUrl);
-          setStatus({type:"success",msg:"✅ Excel downloaded — 7 sheets generated."});
-          setProgress("");setProcessing(false);worker.terminate();
-        }
-        else if(type==="error"){
-          setStatus({type:"error",msg:`❌ Error: ${msg}`});
-          setProgress("");setProcessing(false);worker.terminate();URL.revokeObjectURL(workerUrl);
-        }
-      };
-
-      worker.postMessage({type:"process",payload:{domain,matchKey,splitPaymentType,market,billingType,offAB,sysAB}},[offAB,sysAB]);
+      setProgress("Parsing files...");
+      const[offRaw,sysRaw]=await Promise.all([readFile(offFile),readFile(sysFile)]);
+      setProgress(`Parsed: ${offRaw.length} offline rows, ${sysRaw.length} system rows`);
+      await new Promise(res=>setTimeout(res,20));
+      const wb=await processFiles(domain,matchKey,splitPaymentType,offRaw,sysRaw,setProgress);
+      setProgress("Generating Excel file...");
+      await new Promise(res=>setTimeout(res,10));
+      const btSlug=billingType?`_${billingType.replace(/\s+/g,"_")}` :"";
+      XLSX.writeFile(wb,`Reconciliation_${market}_${domain.replace(/\s+/g,"_")}${btSlug}_${today()}.xlsx`);
+      setStatus({type:"success",msg:"✅ Excel downloaded — 7 sheets generated."});
+      setProgress("");
     }catch(err){
       setStatus({type:"error",msg:`❌ Error: ${err.message}`});
-      setProgress("");setProcessing(false);
+      setProgress("");
     }
+    setProcessing(false);
   },[domain,market,billingType,sysFile,offFile]);
 
   return(
@@ -589,15 +441,12 @@ function App(){
               </select>
             </div>
           </div>
-          {needsBilling&&(
-            <div style={{marginTop:4}}>
-              <div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Billing Type</div>
-              <select value={billingType} onChange={e=>setBillingType(e.target.value)} style={{width:"100%",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${billingType?UI.primary:UI.border}`,fontSize:15,color:billingType?"#111":UI.muted,background:UI.white,outline:"none",cursor:"pointer"}}>
-                <option value="">— Select Billing Type —</option>
-                {DOMAINS[domain].billingTypes.map(bt=><option key={bt} value={bt}>{bt}</option>)}
-              </select>
-            </div>
-          )}
+          {needsBilling&&(<div style={{marginTop:4}}><div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Billing Type</div>
+            <select value={billingType} onChange={e=>setBillingType(e.target.value)} style={{width:"100%",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${billingType?UI.primary:UI.border}`,fontSize:15,color:billingType?"#111":UI.muted,background:UI.white,outline:"none",cursor:"pointer"}}>
+              <option value="">— Select Billing Type —</option>
+              {DOMAINS[domain].billingTypes.map(bt=><option key={bt} value={bt}>{bt}</option>)}
+            </select>
+          </div>)}
           {domain&&<div style={{marginTop:10,fontSize:13,color:UI.muted}}>Matching key: <span style={{color:UI.primary,fontWeight:600}}>{DOMAINS[domain].matchKey}</span></div>}
         </div>
 
