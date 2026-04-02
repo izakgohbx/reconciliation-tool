@@ -8,14 +8,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', system-ui, sans-serif; background: #f9fafb; }
-  </style>
+  <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Inter', system-ui, sans-serif; background: #f9fafb; }</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
+<div id="root"></div>
+<script type="text/babel">
 const { useState, useCallback } = React;
 
 const DOMAINS = {
@@ -25,12 +22,7 @@ const DOMAINS = {
   "Labor Payroll":     { matchKey:"Ops ID", portalPath:"Labour Payroll", splitPaymentType:true },
 };
 const MARKETS = ["BR","ID","MY","PH","SG","TH","TW","VN"];
-
-const EXCLUDE_KEYWORDS = [
-  "id","type","date","time","group","rate","rule","vehicle","agency",
-  "days","name","status","period","start","end","update","driver","ops","billing",
-  "rest day","data source","restday","datasource","payment"
-];
+const EXCLUDE_KEYWORDS = ["id","type","date","time","group","rate","rule","vehicle","agency","days","name","status","period","start","end","update","driver","ops","billing","rest day","data source","restday","datasource","payment"];
 
 function isCostCol(col){ const l=col.toLowerCase().trim(); return !EXCLUDE_KEYWORDS.some(kw=>l.includes(kw)); }
 function isTotalCol(col){ return col.toLowerCase().includes("total"); }
@@ -66,7 +58,6 @@ function today(){
   const tm=`${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}${String(d.getSeconds()).padStart(2,"0")}`;
   return `${dt}_${tm}`;
 }
-
 function countDuplicates(rows,matchKey){
   const counts={};
   for(const r of rows){const k=String(r[matchKey]??"").trim();if(k)counts[k]=(counts[k]||0)+1;}
@@ -74,7 +65,6 @@ function countDuplicates(rows,matchKey){
   for(const cnt of Object.values(counts)){if(cnt===1)unique+=1;else duped+=cnt;}
   return{unique,duped,total:rows.length};
 }
-
 function getPaymentType(row){
   const pt=String(row["Payment Type"]??"").trim().toLowerCase();
   if(pt==="salary") return "Salary";
@@ -84,7 +74,7 @@ function getPaymentType(row){
 }
 
 const P={
-  navy:"1E3A5F",blue:"2563EB",teal:"0D9488",green:"16A34A",red:"DC2626",amber:"D97706",grey:"6B7280",purple:"7C3AED",
+  navy:"1E3A5F",blue:"2563EB",teal:"0D9488",green:"16A34A",red:"DC2626",amber:"D97706",purple:"7C3AED",
   lgrey:"F3F4F6",lred:"FEE2E2",lgreen:"DCFCE7",lyellow:"FEF9C3",lblue:"DBEAFE",lteal:"CCFBF1",lpurple:"EDE9FE",
   white:"FFFFFF",text:"111827",muted:"6B7280",
 };
@@ -93,11 +83,8 @@ const noFill=()=>({patternType:"none"});
 
 function cell(v,opts={}){
   const{bold=false,italic=false,sz=9,fc=P.text,bg=null,align="left",fmt=null,border=true}=opts;
-  const brd=border?{top:{style:"thin",color:{rgb:"E5E7EB"}},bottom:{style:"thin",color:{rgb:"E5E7EB"}},
-    left:{style:"thin",color:{rgb:"E5E7EB"}},right:{style:"thin",color:{rgb:"E5E7EB"}}}:{};
-  return{v,t:typeof v==="number"?"n":"s",
-    s:{font:{bold,italic,sz,color:{rgb:fc}},alignment:{horizontal:align,vertical:"center"},
-       fill:bg?fillS(bg):noFill(),border:brd},...(fmt?{z:fmt}:{})};
+  const brd=border?{top:{style:"thin",color:{rgb:"E5E7EB"}},bottom:{style:"thin",color:{rgb:"E5E7EB"}},left:{style:"thin",color:{rgb:"E5E7EB"}},right:{style:"thin",color:{rgb:"E5E7EB"}}}:{};
+  return{v,t:typeof v==="number"?"n":"s",s:{font:{bold,italic,sz,color:{rgb:fc}},alignment:{horizontal:align,vertical:"center"},fill:bg?fillS(bg):noFill(),border:brd},...(fmt?{z:fmt}:{})};
 }
 function hdr(v,bg=P.navy,align="center",sz=9){return cell(v,{bold:true,fc:P.white,bg,align,sz});}
 function numCell(v,bg=null,fc=P.text){
@@ -142,8 +129,22 @@ function buildSinglePass(domain,matchKey,offRaw,sysRaw){
   const fullMatchKeys=matchedKeys.filter(k=>costColsAll.every(c=>cmp(k)[c].match));
   const mismatchKeys=matchedKeys.filter(k=>!costColsAll.every(c=>cmp(k)[c].match));
 
-  function calcAcc(){if(!totalCols.length)return pct(fullMatchKeys.length,offKeys.length);let num=0,den=0;for(const k of offKeys){const dv=totalCols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);den+=dv;if(sysIdx[k]&&costColsAll.every(c=>cmp(k)[c].match))num+=dv;}return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";}
-  function compStat(c){const offTotal=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);const sysTotal=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);const variance=f2(sysTotal-offTotal);const varPct=offTotal!==0?`${((1-variance/Math.abs(offTotal))*100).toFixed(1)}%`:"N/A";const misCnt=matchedKeys.filter(k=>!cmp(k)[c].match).length;const sysUniq=new Set(matchedKeys.filter(k=>!cmp(k)[c].match)).size;return{offTotal:f2(offTotal),sysTotal:f2(sysTotal),variance,varPct,misCnt,sysUniq};}
+  function calcAcc(){
+    if(!totalCols.length) return pct(fullMatchKeys.length,offKeys.length);
+    let num=0,den=0;
+    for(const k of offKeys) den+=totalCols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
+    for(const k of matchedKeys){const comparison=cmp(k);for(const c of costColsAll){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
+    return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
+  }
+  function compStat(c){
+    const offTotal=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);
+    const sysTotal=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);
+    const variance=f2(sysTotal-offTotal);
+    const varPct=offTotal!==0?`${((variance/Math.abs(offTotal))*100).toFixed(1)}%`:"N/A";
+    const misCnt=matchedKeys.filter(k=>!cmp(k)[c].match).length;
+    const sysUniq=new Set(matchedKeys.filter(k=>!cmp(k)[c].match)).size;
+    return{offTotal:f2(offTotal),sysTotal:f2(sysTotal),variance,varPct,misCnt,sysUniq};
+  }
 
   function buildSummary(){
     const ws={},mrgs=[];let r=0;const W=5;
@@ -233,8 +234,14 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw){
     function cmp(k){const res={};for(const c of costColsAll){const ov=offIdx[k]?.[c]??null,sv=sysIdx[k]?.[c]??null;res[c]={ov,sv,diff:f2(orZero(sv)-orZero(ov)),match:orZero(ov)===orZero(sv)};}return res;}
     const fullMatchKeys=matchedKeys.filter(k=>costColsAll.every(c=>cmp(k)[c].match));
     const mismatchKeys=matchedKeys.filter(k=>!costColsAll.every(c=>cmp(k)[c].match));
-    function calcAcc(){if(!totalCols.length)return pct(fullMatchKeys.length,offKeys.length);let num=0,den=0;for(const k of offKeys){const dv=totalCols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);den+=dv;if(sysIdx[k]&&costColsAll.every(c=>cmp(k)[c].match))num+=dv;}return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";}
-    function compStat(c){const offTotal=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);const sysTotal=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);const variance=f2(sysTotal-offTotal);const varPct=offTotal!==0?`${((1-variance/Math.abs(offTotal))*100).toFixed(1)}%`:"N/A";const misCnt=matchedKeys.filter(k=>!cmp(k)[c].match).length;const sysUniq=new Set(matchedKeys.filter(k=>!cmp(k)[c].match)).size;return{offTotal:f2(offTotal),sysTotal:f2(sysTotal),variance,varPct,misCnt,sysUniq};}
+    function calcAcc(){
+      if(!totalCols.length) return pct(fullMatchKeys.length,offKeys.length);
+      let num=0,den=0;
+      for(const k of offKeys) den+=totalCols.reduce((s,c)=>s+orZero(offIdx[k]?.[c]),0);
+      for(const k of matchedKeys){const comparison=cmp(k);for(const c of costColsAll){if(comparison[c].match)num+=orZero(offIdx[k]?.[c]);}}
+      return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
+    }
+    function compStat(c){const offTotal=offKeys.reduce((s,k)=>s+orZero(offIdx[k]?.[c]),0);const sysTotal=matchedKeys.reduce((s,k)=>s+orZero(sysIdx[k]?.[c]),0);const variance=f2(sysTotal-offTotal);const varPct=offTotal!==0?`${((variance/Math.abs(offTotal))*100).toFixed(1)}%`:"N/A";const misCnt=matchedKeys.filter(k=>!cmp(k)[c].match).length;const sysUniq=new Set(matchedKeys.filter(k=>!cmp(k)[c].match)).size;return{offTotal:f2(offTotal),sysTotal:f2(sysTotal),variance,varPct,misCnt,sysUniq};}
     return{...p,offRows,sysRows,costColsAll,totalCols,compCols,infoCols,offIdx,sysIdx,offRawMap,sysRawMap,offKeys,sysKeys,matchedKeys,offOnlyKeys,sysOnlyKeys,dup,cmp,fullMatchKeys,mismatchKeys,calcAcc,compStat};
   });
 
@@ -243,7 +250,14 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw){
   const sysDupAll=countDuplicates(sysRaw,matchKey);
   const uniqueSysIDs=new Set(sysRaw.map(r=>String(r[matchKey]??"").trim()).filter(Boolean)).size;
 
-  function calcOverallAcc(){let num=0,den=0;for(const p of passes){if(!p.totalCols.length)continue;for(const k of p.offKeys){const dv=p.totalCols.reduce((s,c)=>s+orZero(p.offIdx[k]?.[c]),0);den+=dv;if(p.sysIdx[k]&&p.costColsAll.every(c=>p.cmp(k)[c].match))num+=dv;}}return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";}
+  function calcOverallAcc(){
+    let num=0,den=0;
+    for(const p of passes){
+      if(p.totalCols.length) for(const k of p.offKeys) den+=p.totalCols.reduce((s,c)=>s+orZero(p.offIdx[k]?.[c]),0);
+      for(const k of p.matchedKeys){const comparison=p.cmp(k);for(const c of p.costColsAll){if(comparison[c].match)num+=orZero(p.offIdx[k]?.[c]);}}
+    }
+    return den>0?`${((num/den)*100).toFixed(1)}%`:"N/A";
+  }
 
   function buildSummary(){
     const ws={},mrgs=[];let r=0;const W=5;
@@ -261,15 +275,7 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw){
     r2("  ↳  Billing Status: Fail",sysFailRows.length,P.lred,"(all rows incl. duplicates)");
     r2("Overall Accuracy %",calcOverallAcc(),P.lteal);r++;
     for(const p of passes){
-      if(!p.offRows.length&&!p.sysRows.length)continue;
-      st(`RECONCILIATION SUMMARY — ${p.label.toUpperCase()}  (Payment Type: ${p.label})`,p.bg);
-      r2(`Offline File — Total ${p.label} rows`,p.offRows.length,P.lgrey);r2("Offline File — Unique IDs",p.dup.off.unique,P.lgrey,"(IDs appearing exactly once)");r2("Offline File — Duplicated IDs",p.dup.off.duped,P.lgrey,"(total rows appearing >1 time)",false);
-      r2(`System File — Total ${p.label} rows`,p.sysRows.length,P.lgrey);r2("System File — Unique IDs",p.dup.sys.unique,P.lgrey,"(IDs appearing exactly once)");r2("System File — Duplicated IDs",p.dup.sys.duped,P.lgrey,"(total rows appearing >1 time)",false);r++;
-      r2("IDs in both Offline & System",p.matchedKeys.length,P.lblue,pct(p.matchedKeys.length,p.offKeys.length)+" of offline");
-      r2("IDs in Offline only",p.offOnlyKeys.length,P.lred,pct(p.offOnlyKeys.length,p.offKeys.length)+" of offline");
-      r2("IDs in System only",p.sysOnlyKeys.length,P.lyellow,pct(p.sysOnlyKeys.length,p.sysKeys.length)+" of system");
-      r2(`Full Match IDs (all ${p.label} components)`,p.fullMatchKeys.length,P.lgreen,pct(p.fullMatchKeys.length,p.offKeys.length)+" of offline");
-      r2(`Overall ${p.label} Accuracy %`,p.calcAcc(),P.lteal);r++;
+      if(!p.offRows.length&&!p.sysRows.length) continue;
       const lpBg=p.bg===P.teal?P.lblue:p.bg===P.purple?P.lpurple:"FEF3C7";
       st(`${p.label.toUpperCase()} COMPONENTS BREAKDOWN`,p.bg);
       th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %","# Unique Sys IDs w/ Mismatch"],lpBg);
@@ -380,14 +386,6 @@ function App(){
     setProcessing(false);
   },[domain,market,billingType,sysFile,offFile]);
 
-  const sel=(val,set,ph,opts)=>(
-    <select value={val} onChange={e=>set(e.target.value)}
-      style={{width:"100%",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${val?UI.primary:UI.border}`,fontSize:15,color:val?"#111":UI.muted,background:UI.white,outline:"none",cursor:"pointer"}}>
-      <option value="">{ph}</option>
-      {opts.map(o=><option key={o} value={o}>{o}</option>)}
-    </select>
-  );
-
   return(
     <div style={{minHeight:"100vh",background:UI.bg,fontFamily:"'Inter',sans-serif",padding:"32px 16px"}}>
       <div style={{maxWidth:680,margin:"0 auto"}}>
@@ -448,16 +446,30 @@ function App(){
         <div style={{background:UI.white,borderRadius:12,padding:"22px 28px",marginBottom:16,border:`1px solid ${UI.border}`}}>
           <div style={{fontSize:13,fontWeight:600,color:UI.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>Step 1 — Select Market &amp; Domain</div>
           <div style={{display:"flex",gap:12,marginBottom:12}}>
-            <div style={{flex:"0 0 120px"}}><div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Market</div>{sel(market,setMarket,"— Market —",MARKETS)}</div>
-            <div style={{flex:1}}><div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Domain</div>
-              <select value={domain} onChange={e=>{setDomain(e.target.value);setBillingType("");}}
-                style={{width:"100%",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${domain?UI.primary:UI.border}`,fontSize:15,color:domain?"#111":UI.muted,background:UI.white,outline:"none",cursor:"pointer"}}>
+            <div style={{flex:"0 0 120px"}}>
+              <div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Market</div>
+              <select value={market} onChange={e=>setMarket(e.target.value)} style={{width:"100%",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${market?UI.primary:UI.border}`,fontSize:15,color:market?"#111":UI.muted,background:UI.white,outline:"none",cursor:"pointer"}}>
+                <option value="">— Market —</option>
+                {MARKETS.map(m=><option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Domain</div>
+              <select value={domain} onChange={e=>{setDomain(e.target.value);setBillingType("");}} style={{width:"100%",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${domain?UI.primary:UI.border}`,fontSize:15,color:domain?"#111":UI.muted,background:UI.white,outline:"none",cursor:"pointer"}}>
                 <option value="">— Domain —</option>
                 {Object.keys(DOMAINS).map(d=><option key={d} value={d}>{d}</option>)}
               </select>
             </div>
           </div>
-          {needsBilling&&(<div style={{marginTop:4}}><div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Billing Type</div>{sel(billingType,setBillingType,"— Select Billing Type —",DOMAINS[domain].billingTypes)}</div>)}
+          {needsBilling&&(
+            <div style={{marginTop:4}}>
+              <div style={{fontSize:12,color:UI.muted,marginBottom:4}}>Billing Type</div>
+              <select value={billingType} onChange={e=>setBillingType(e.target.value)} style={{width:"100%",padding:"10px 14px",borderRadius:8,border:`1.5px solid ${billingType?UI.primary:UI.border}`,fontSize:15,color:billingType?"#111":UI.muted,background:UI.white,outline:"none",cursor:"pointer"}}>
+                <option value="">— Select Billing Type —</option>
+                {DOMAINS[domain].billingTypes.map(bt=><option key={bt} value={bt}>{bt}</option>)}
+              </select>
+            </div>
+          )}
           {domain&&<div style={{marginTop:10,fontSize:13,color:UI.muted}}>Matching key: <span style={{color:UI.primary,fontWeight:600}}>{DOMAINS[domain].matchKey}</span></div>}
         </div>
 
@@ -489,23 +501,12 @@ function App(){
           border:`1px solid ${status.type==="success"?"#bbf7d0":"#fecaca"}`}}>
           {status.msg}
         </div>}
-
-        <div style={{marginTop:16,fontSize:12,color:UI.muted,lineHeight:1.9,padding:"0 4px"}}>
-          <div style={{fontWeight:600,marginBottom:4}}>Output: 7-sheet Excel file</div>
-          <div>📊 <b>Sheet 1</b> — Summary</div>
-          <div>✅ <b>Sheet 2</b> — Matched Records</div>
-          <div>⚠️ <b>Sheet 3</b> — Mismatch Records</div>
-          <div>🔴 <b>Sheet 4</b> — Offline Only</div>
-          <div>🟡 <b>Sheet 5</b> — Failed Billing Orders</div>
-          <div>📄 <b>Sheet 6</b> — Raw System File</div>
-          <div>📄 <b>Sheet 7</b> — Raw Offline File</div>
-        </div>
       </div>
     </div>
   );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-  </script>
+</script>
 </body>
 </html>
