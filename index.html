@@ -282,7 +282,11 @@ function buildSplitPass(domain,matchKey,offRaw,sysRaw){
       th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %"],lpBg);
       for(const c of [...p.compCols,...p.totalCols]){const isTot=isTotalCol(c);const cs=p.compStat(c);const bad=cs.variance!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
         ws[enc(r,0)]=cell(c,{sz:9,bg,bold:isTot});ws[enc(r,1)]=numCell(cs.offTotal,bg);ws[enc(r,2)]=numCell(cs.sysTotal,bg);ws[enc(r,3)]=numCell(cs.variance,bg,cs.variance<0?P.red:cs.variance>0?P.green:P.text);ws[enc(r,4)]=cell(cs.varPct,{sz:9,bg,fc,align:"center",bold:isTot});r++;}
-      r++;
+      // Accuracy % row at bottom of each pass breakdown
+      ws[enc(r,0)]=cell(`${p.label} Accuracy %`,{sz:9,bg:P.lteal,bold:true});
+      mrgs.push(mrg({r,c:0},{r,c:3}));
+      ws[enc(r,4)]=cell(p.calcAcc(),{sz:9,bg:P.lteal,fc:P.teal,bold:true,align:"center"});
+      r++;r++;
     }
     ws["!merges"]=mrgs;setRef(ws,r,W);ws["!cols"]=colW([34,16,16,16,12]);ws["!rows"]=Array(r+1).fill({hpt:18});return ws;
   }
