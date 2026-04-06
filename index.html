@@ -24,13 +24,18 @@ const DOMAINS={
 const MARKETS=["BR","ID","MY","PH","SG","TH","TW","VN"];
 const EXCL=["id","type","date","time","group","rate","rule","vehicle","agency","name","status","period","start","end","update","driver","ops","data source","datasource","payment"];
 
-// Columns that should never be treated as cost components regardless of name
-const EXCL_EXACT=["billing status","billing id","billing start","billing end","billing period","rest day","days in billing","data source","payment type"];
+const EXCL_EXACT=[
+  "billing status","billing id","billing start","billing end","billing period",
+  "billing failed reason","billing reason","rest day","days in billing",
+  "data source","payment type"
+];
 
-const isCostCol=c=>{
+// Cost columns must exist in BOTH offline and system files to be reconciled
+const isCostCol=(c,sysColSet)=>{
   const l=c.toLowerCase().trim();
   if(EXCL_EXACT.some(e=>l===e||l.includes(e)))return false;
-  return !EXCL.some(k=>l.includes(k));
+  if(EXCL.some(k=>l.includes(k)))return false;
+  return true;
 };
 const isTotalCol=c=>c.toLowerCase().includes("total");
 
@@ -421,9 +426,13 @@ async function processFiles(domain,matchKey,splitPaymentType,offRaw,sysRaw,setPr
 
   const passes=PASS_DEFS.map(pd=>{
     const offRows=offRaw.filter(pd.filter),sysRows=sysRaw.filter(pd.filter);
-    const costColsAll=!offRows.length?[]:Object.keys(offRows[0]).filter(c=>c!==matchKey&&c!=="Billing ID"&&isCostCol(c));
+    // Detect cost cols from UNION of offline + system columns
+    const offCols=offRows.length?Object.keys(offRows[0]):[];
+    const sysCols=sysRows.length?Object.keys(sysRows[0]):[];
+    const allCols=[...new Set([...offCols,...sysCols])];
+    const costColsAll=allCols.filter(c=>c!==matchKey&&c!=="Billing ID"&&isCostCol(c));
     const totalCols=costColsAll.filter(isTotalCol),compCols=costColsAll.filter(c=>!isTotalCol(c));
-    const infoCols=Object.keys(offRows[0]||offRaw[0]||{}).filter(c=>c!==matchKey&&!costColsAll.includes(c));
+    const infoCols=offCols.filter(c=>c!==matchKey&&!costColsAll.includes(c));
     const{idx:offIdx,rm:offRm}=buildIdx(offRows,matchKey,costColsAll);
     const{idx:sysIdx,rm:sysRm}=buildIdx(sysRows,matchKey,costColsAll);
     const offKeys=Object.keys(offIdx),sysKeys=Object.keys(sysIdx);
