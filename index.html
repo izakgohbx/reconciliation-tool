@@ -633,6 +633,20 @@ function App(){
             <FileUpload label="System Billing File" file={sysFile} onChange={setSysFile}/>
             <FileUpload label="Offline Billing File" file={offFile} onChange={setOffFile}/>
           </div>
+          <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+              <span style={{fontSize:13,color:"#D97706",marginTop:1}}>💡</span>
+              <div style={{fontSize:12,color:"#92400e",lineHeight:1.6}}>
+                <b>File too large?</b> Split it into smaller periods before uploading — e.g. if a monthly file is too big, split it into biweekly or weekly files and run the reconciliation separately for each period.
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+              <span style={{fontSize:13,color:"#D97706",marginTop:1}}>💡</span>
+              <div style={{fontSize:12,color:"#92400e",lineHeight:1.6}}>
+                <b>Fee component columns must contain numerical values only.</b> Remove any text, currency symbols, or formatting (e.g. "₱1,000" should be "1000") before uploading — or the tool will be unable to read the values correctly.
+              </div>
+            </div>
+          </div>
         </div>
 
         <div style={{background:UI.white,borderRadius:12,padding:"22px 28px",marginBottom:16,border:`1px solid ${UI.border}`}}>
