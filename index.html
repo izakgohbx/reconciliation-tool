@@ -141,11 +141,11 @@ function buildSummary(domain,sysRaw,mk,passes,sysDup,sysSucc,sysFail,uniqueSysID
     if(!p.offRows.length&&!p.sysRows.length)continue;
     const lpBg=p.bg===P.teal?P.lblue:p.bg===P.purple?P.lpurple:"FEF3C7";
     st(`${p.label.toUpperCase()} COMPONENTS BREAKDOWN`,p.bg);
-    th(["Cost Component","Offline Total","System Total","Variance ($)","Variance %"],lpBg);
+    th(["Cost Component","System Total","Offline Total","Variance ($)","Variance %"],lpBg);
     for(const c of [...p.compCols,...p.totalCols]){
       const isTot=isTotalCol(c),cs=compStat(c,p.offKeys,p.matchedKeys,p.offIdx,p.sysIdx,p.cmp);
       const bad=cs.v!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
-      ws[en(r,0)]=cl(c,{sz:9,bg,bold:isTot});ws[en(r,1)]=nc(cs.ot,bg);ws[en(r,2)]=nc(cs.st,bg);
+      ws[en(r,0)]=cl(c,{sz:9,bg,bold:isTot});ws[en(r,1)]=nc(cs.st,bg);ws[en(r,2)]=nc(cs.ot,bg);
       ws[en(r,3)]=nc(cs.v,bg,cs.v<0?P.red:cs.v>0?P.green:P.text);
       ws[en(r,4)]=cl(cs.vp,{sz:9,bg,fc,align:"center",bold:isTot});r++;
     }
@@ -245,6 +245,162 @@ function buildFailed(sysRaw,mk){
   ws["!merges"]=mrgs;sr(ws,r,tC);ws["!cols"]=hdrs.map(()=>({wch:16}));return ws;
 }
 
+// ── Difference reason logic ───────────────────────────────────────────────────
+function diagnoseReasons(passes, sysRaw, offRaw, matchKey) {
+  // Collect duplicate IDs
+  function getDupIDs(rows) {
+    const c = {};
+    for (const r of rows) { const k = String(r[matchKey] ?? "").trim(); if (k) c[k] = (c[k] || 0) + 1; }
+    return new Set(Object.entries(c).filter(([,v]) => v > 1).map(([k]) => k));
+  }
+  const sysDupIDs = getDupIDs(sysRaw);
+  const offDupIDs = getDupIDs(offRaw);
+
+  // Per-ID reason map: id -> Set of reasons
+  const reasonMap = {};
+  const addReason = (id, reason) => { if (!reasonMap[id]) reasonMap[id] = new Set(); reasonMap[id].add(reason); };
+
+  for (const p of passes) {
+    // Mismatch reasons
+    for (const k of p.mismatchKeys) {
+      const cp = p.cmp(k);
+      for (const c of p.costColsAll) {
+        const { ov, sv } = cp[c];
+        const o = orZero(ov), s = orZero(sv);
+        if (!cp[c].match) {
+          if (o > 0 && s === 0) addReason(k, "System value = 0 but offline > 0 (missing in system)");
+          else if (o === 0 && s > 0) addReason(k, "Offline value = 0 but system > 0 (extra in system)");
+          else if (o !== s) addReason(k, "Values differ but both > 0 (amount mismatch)");
+        }
+      }
+    }
+    // Offline only
+    for (const k of p.offOnlyKeys) addReason(k, "ID exists in offline only (not billed in system)");
+    // System only
+    for (const k of p.sysOnlyKeys) addReason(k, "ID exists in system only (not in offline file)");
+  }
+  // Duplicates
+  for (const k of sysDupIDs) addReason(k, "Duplicate IDs in system file");
+  for (const k of offDupIDs) addReason(k, "Duplicate IDs in offline file");
+
+  return reasonMap;
+}
+
+// ── Tab 8: Difference Summary ─────────────────────────────────────────────────
+function buildDiffSummary(reasonMap, matchKey) {
+  const REASON_TYPES = [
+    "System value = 0 but offline > 0 (missing in system)",
+    "Offline value = 0 but system > 0 (extra in system)",
+    "Values differ but both > 0 (amount mismatch)",
+    "ID exists in offline only (not billed in system)",
+    "ID exists in system only (not in offline file)",
+    "Duplicate IDs in system file",
+    "Duplicate IDs in offline file",
+  ];
+
+  // Count IDs per reason
+  const counts = {};
+  for (const [, reasons] of Object.entries(reasonMap)) {
+    for (const r of reasons) counts[r] = (counts[r] || 0) + 1;
+  }
+
+  const ws = {}, mrgs = []; let r = 0; const W = 3;
+  ws[en(r,0)] = cl("DIFFERENCE SUMMARY", {bold:true, sz:12, fc:P.white, bg:P.navy, align:"center"});
+  mrgs.push(mg({r,c:0},{r,c:W})); r++;
+  ws[en(r,0)] = cl("Summary of possible reasons for billing discrepancies, grouped by type.",
+    {italic:true, sz:8, fc:P.muted, align:"left", border:false});
+  mrgs.push(mg({r,c:0},{r,c:W})); r+=2;
+
+  // Header
+  ["Reason / Difference Type","Category","# Affected IDs","% of All Flagged IDs"].forEach((h,i) => {
+    ws[en(r,i)] = cl(h, {bold:true, sz:8, fc:P.navy, bg:P.lblue, align:i===0?"left":"center"});
+  }); r++;
+
+  const totalFlagged = Object.keys(reasonMap).length;
+  const CATEGORIES = {
+    "System value = 0 but offline > 0 (missing in system)": "Missing in System",
+    "Offline value = 0 but system > 0 (extra in system)":   "Extra in System",
+    "Values differ but both > 0 (amount mismatch)":         "Amount Mismatch",
+    "ID exists in offline only (not billed in system)":     "Offline Only",
+    "ID exists in system only (not in offline file)":       "System Only",
+    "Duplicate IDs in system file":                         "Duplicate",
+    "Duplicate IDs in offline file":                        "Duplicate",
+  };
+
+  for (const reason of REASON_TYPES) {
+    const cnt = counts[reason] || 0;
+    const pctStr = totalFlagged > 0 ? `${((cnt/totalFlagged)*100).toFixed(1)}%` : "0.0%";
+    const bg = cnt > 0 ? P.lred : P.lgreen;
+    const fc = cnt > 0 ? P.red  : P.green;
+    ws[en(r,0)] = cl(reason,        {sz:9, bg});
+    ws[en(r,1)] = cl(CATEGORIES[reason], {sz:9, bg, align:"center"});
+    ws[en(r,2)] = cl(cnt,           {sz:9, bg, fc, align:"center", bold:cnt>0});
+    ws[en(r,3)] = cl(pctStr,        {sz:9, bg, fc, align:"center"});
+    r++;
+  }
+  r++;
+  // Total row
+  ws[en(r,0)] = cl("TOTAL FLAGGED IDs", {bold:true, sz:9, bg:P.lgrey});
+  ws[en(r,1)] = cl("", {bg:P.lgrey});
+  ws[en(r,2)] = cl(totalFlagged, {bold:true, sz:9, bg:P.lgrey, align:"center"});
+  ws[en(r,3)] = cl("100.0%", {bold:true, sz:9, bg:P.lgrey, align:"center"});
+  r++;
+
+  ws["!merges"] = mrgs; sr(ws, r, W);
+  ws["!cols"] = cw([52, 20, 16, 18]);
+  ws["!rows"] = Array(r+1).fill({hpt:18});
+  return ws;
+}
+
+// ── Tab 9: Difference Detail ──────────────────────────────────────────────────
+function buildDiffDetail(reasonMap, passes, matchKey) {
+  const ws = {}, mrgs = []; let r = 0; const W = 3;
+
+  ws[en(r,0)] = cl("DIFFERENCE DETAIL", {bold:true, sz:12, fc:P.white, bg:P.navy, align:"center"});
+  mrgs.push(mg({r,c:0},{r,c:W})); r++;
+  ws[en(r,0)] = cl("One row per Driver ID showing all possible reasons for discrepancy.",
+    {italic:true, sz:8, fc:P.muted, align:"left", border:false});
+  mrgs.push(mg({r,c:0},{r,c:W})); r+=2;
+
+  // Header
+  [matchKey, "Payment Type(s)", "# Reasons", "Possible Reason(s)"].forEach((h,i) => {
+    ws[en(r,i)] = cl(h, {bold:true, sz:8, fc:P.navy, bg:P.lblue, align:i===0?"left":"center"});
+  }); r++;
+
+  // Build payment type lookup per ID
+  const ptMap = {};
+  for (const p of passes) {
+    for (const k of [...p.offKeys, ...p.sysKeys]) {
+      if (!ptMap[k]) ptMap[k] = new Set();
+      ptMap[k].add(p.label);
+    }
+  }
+
+  const aoa = [];
+  for (const [id, reasons] of Object.entries(reasonMap)) {
+    const pts = ptMap[id] ? [...ptMap[id]].join(", ") : "";
+    const reasonList = [...reasons].join("; ");
+    aoa.push([String(id), pts, reasons.size, reasonList]);
+  }
+
+  // Sort by # reasons descending
+  aoa.sort((a,b) => b[2] - a[2]);
+
+  if (aoa.length) {
+    const tmp = XLSX.utils.aoa_to_sheet(aoa);
+    const rng = XLSX.utils.decode_range(tmp["!ref"] || "A1:A1");
+    for (let dr=0; dr<=rng.e.r; dr++) for (let dc=0; dc<=rng.e.c; dc++) {
+      const s = XLSX.utils.encode_cell({r:dr,c:dc}), d = XLSX.utils.encode_cell({r:r+dr,c:dc});
+      if (tmp[s]) ws[d] = tmp[s];
+    }
+    r += aoa.length;
+  }
+
+  ws["!merges"] = mrgs; sr(ws, r, W);
+  ws["!cols"] = cw([18, 22, 12, 70]);
+  return ws;
+}
+
 // ── Main process function ─────────────────────────────────────────────────────
 async function processFiles(domain,matchKey,splitPaymentType,offRaw,sysRaw,setProgress){
   const PASS_DEFS=splitPaymentType?[
@@ -302,6 +458,11 @@ async function processFiles(domain,matchKey,splitPaymentType,offRaw,sysRaw,setPr
 
   setProgress("Building Failed Billing Orders...");await new Promise(res=>setTimeout(res,10));
   XLSX.utils.book_append_sheet(wb,buildFailed(sysRaw,matchKey),"Failed Billing Orders");
+
+  setProgress("Building Difference Analysis...");await new Promise(res=>setTimeout(res,10));
+  const reasonMap = diagnoseReasons(passes, sysRaw, offRaw, matchKey);
+  XLSX.utils.book_append_sheet(wb, buildDiffSummary(reasonMap, matchKey), "Difference Summary");
+  XLSX.utils.book_append_sheet(wb, buildDiffDetail(reasonMap, passes, matchKey), "Difference Detail");
 
   setProgress("Writing raw sheets...");await new Promise(res=>setTimeout(res,10));
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sysRaw,{defval:""}),"Raw System File");
