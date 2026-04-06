@@ -22,9 +22,16 @@ const DOMAINS={
   "Labor Payroll":    {matchKey:"Ops ID",portalPath:"Labour Payroll",splitPaymentType:true},
 };
 const MARKETS=["BR","ID","MY","PH","SG","TH","TW","VN"];
-const EXCL=["id","type","date","time","group","rate","rule","vehicle","agency","days","name","status","period","start","end","update","driver","ops","billing","rest day","data source","restday","datasource","payment"];
+const EXCL=["id","type","date","time","group","rate","rule","vehicle","agency","name","status","period","start","end","update","driver","ops","data source","datasource","payment"];
 
-const isCostCol=c=>!EXCL.some(k=>c.toLowerCase().trim().includes(k));
+// Columns that should never be treated as cost components regardless of name
+const EXCL_EXACT=["billing status","billing id","billing start","billing end","billing period","rest day","days in billing","data source","payment type"];
+
+const isCostCol=c=>{
+  const l=c.toLowerCase().trim();
+  if(EXCL_EXACT.some(e=>l===e||l.includes(e)))return false;
+  return !EXCL.some(k=>l.includes(k));
+};
 const isTotalCol=c=>c.toLowerCase().includes("total");
 
 function readFile(file){
