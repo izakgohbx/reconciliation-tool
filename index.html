@@ -344,9 +344,9 @@ function aoaInto(ws,aoa,startRow){
 
 // ── Sheet builders ────────────────────────────────────────────────────────────
 function buildSummaryWs(domain,sysRaw,mk,passes,sysDup,sysSucc,sysFail,uids,overallAcc){
-  var ws={},mrgs=[],r=0,W=5;
+  var ws={},mrgs=[],r=0,W=6;
   function st(t,bg){ws[en(r,0)]=cl(t,{bold:true,sz:9,fc:P.white,bg:bg});mrgs.push(mg({r:r,c:0},{r:r,c:W}));r++;}
-  function r2(l,val,bg,sub,vb){sub=sub||"";vb=vb!==false;ws[en(r,0)]=cl(l,{bg:bg,sz:9});mrgs.push(mg({r:r,c:0},{r:r,c:3}));ws[en(r,4)]=cl(typeof val==="number"?val:String(val),{bg:bg,sz:9,align:"right",bold:vb});ws[en(r,5)]=cl(sub,{bg:bg,fc:P.muted,sz:8,align:"center"});r++;}
+  function r2(l,val,bg,sub,vb){sub=sub||"";vb=vb!==false;ws[en(r,0)]=cl(l,{bg:bg,sz:9});mrgs.push(mg({r:r,c:0},{r:r,c:4}));ws[en(r,5)]=cl(typeof val==="number"?val:String(val),{bg:bg,sz:9,align:"right",bold:vb});ws[en(r,6)]=cl(sub,{bg:bg,fc:P.muted,sz:8,align:"center"});r++;}
   function th(labels,bg){bg=bg||P.lblue;labels.forEach(function(h,i){ws[en(r,i)]=cl(h,{bold:true,sz:8,fc:P.navy,bg:bg,align:i===0?"left":"center"});});r++;}
   ws[en(r,0)]=cl(domain+" Reconciliation Report",{bold:true,sz:14,fc:P.navy,align:"center",border:false});mrgs.push(mg({r:r,c:0},{r:r,c:W}));r++;
   ws[en(r,0)]=cl("Generated: "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})+" "+new Date().toLocaleTimeString(),{italic:true,sz:8,fc:P.muted,align:"center",border:false});mrgs.push(mg({r:r,c:0},{r:r,c:W}));r+=2;
@@ -362,20 +362,30 @@ function buildSummaryWs(domain,sysRaw,mk,passes,sysDup,sysSucc,sysFail,uids,over
     if(!p.offRows.length&&!p.sysRows.length)return;
     var lpBg=p.bg===P.teal?P.lblue:p.bg===P.purple?P.lpurple:"FEF3C7";
     st(p.label.toUpperCase()+" COMPONENTS BREAKDOWN",p.bg);
-    th(["Cost Component","System Total","Offline Total","Variance ($)","Variance %"],lpBg);
+    th(["Cost Component","System Total","Offline Total","Variance ($)","Variance %","Accuracy %"],lpBg);
     p.compCols.concat(p.totalCols).forEach(function(c){
       var isTot=isTotalCol(c);
       var ot=p.offKeys.reduce(function(s,k){return s+oz(p.offIdx[k]?p.offIdx[k][c]:null);},0);
       var st2=p.matchedKeys.reduce(function(s,k){return s+oz(p.sysIdx[k]?p.sysIdx[k][c]:null);},0);
       var vv=f2(st2-ot),vp=ot!==0?((vv/Math.abs(ot))*100).toFixed(1)+"%":"N/A";
+      // per-component accuracy: sum of offline values where system matches / total offline value
+      var compNum=0,compDen=0;
+      p.matchedKeys.forEach(function(k){
+        var ov=oz(p.offIdx[k]?p.offIdx[k][c]:null),sv=oz(p.sysIdx[k]?p.sysIdx[k][c]:null);
+        compDen+=ov;if(ov===sv)compNum+=ov;
+      });
+      p.offOnlyKeys.forEach(function(k){compDen+=oz(p.offIdx[k]?p.offIdx[k][c]:null);});
+      var compAcc=compDen>0?((compNum/compDen)*100).toFixed(1)+"%":"N/A";
       var bad=vv!==0,bg=bad?P.lred:P.lgreen,fc=bad?P.red:P.green;
+      var accFc=compAcc==="N/A"?P.muted:(compAcc==="100.0%"?P.green:P.red);
       ws[en(r,0)]=cl(c,{sz:9,bg:bg,bold:isTot});ws[en(r,1)]=nc(f2(st2),bg);ws[en(r,2)]=nc(f2(ot),bg);
-      ws[en(r,3)]=nc(vv,bg,vv<0?P.red:vv>0?P.green:P.text);ws[en(r,4)]=cl(vp,{sz:9,bg:bg,fc:fc,align:"center",bold:isTot});r++;
+      ws[en(r,3)]=nc(vv,bg,vv<0?P.red:vv>0?P.green:P.text);ws[en(r,4)]=cl(vp,{sz:9,bg:bg,fc:fc,align:"center",bold:isTot});
+      ws[en(r,5)]=cl(compAcc,{sz:9,bg:bg,fc:accFc,align:"center",bold:isTot});r++;
     });
-    ws[en(r,0)]=cl(p.label+" Accuracy %",{sz:9,bg:P.lteal,bold:true});mrgs.push(mg({r:r,c:0},{r:r,c:3}));
-    ws[en(r,4)]=cl(p.acc,{sz:9,bg:P.lteal,fc:P.teal,bold:true,align:"center"});r++;r++;
+    ws[en(r,0)]=cl(p.label+" Accuracy %",{sz:9,bg:P.lteal,bold:true});mrgs.push(mg({r:r,c:0},{r:r,c:4}));
+    ws[en(r,5)]=cl(p.acc,{sz:9,bg:P.lteal,fc:P.teal,bold:true,align:"center"});r++;r++;
   });
-  ws["!merges"]=mrgs;sref(ws,r,W);ws["!cols"]=cw([34,16,16,16,12]);
+  ws["!merges"]=mrgs;sref(ws,r,W);ws["!cols"]=cw([34,16,16,16,12,12]);
   ws["!rows"]=[];for(var i=0;i<=r;i++)ws["!rows"].push({hpt:18});
   return ws;
 }
@@ -529,8 +539,6 @@ async function run(){
     addAoa("Mismatch Records", detailAOA(passes,function(p){return p.mismatchKeys;},false));
     addAoa("Offline Only",     offlineOnlyAOA(passes));
     addAoa("Failed Billing Orders",failedAOA(sysRaw));
-    addAoa("Raw System File",  [Object.keys(sysRaw[0]||{})].concat(sysRaw.map(function(r){return Object.values(r);})));
-    addAoa("Raw Offline File", [Object.keys(offRaw[0]||{})].concat(offRaw.map(function(r){return Object.values(r);})));
 
     setProgress("Writing Excel file...");
     await new Promise(function(res){setTimeout(res,10);});
